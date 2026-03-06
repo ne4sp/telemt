@@ -75,6 +75,14 @@ pub struct Stats {
     me_floor_mode_switch_total: AtomicU64,
     me_floor_mode_switch_static_to_adaptive_total: AtomicU64,
     me_floor_mode_switch_adaptive_to_static_total: AtomicU64,
+    me_floor_cpu_cores_detected_gauge: AtomicU64,
+    me_floor_cpu_cores_effective_gauge: AtomicU64,
+    me_floor_global_cap_raw_gauge: AtomicU64,
+    me_floor_global_cap_effective_gauge: AtomicU64,
+    me_floor_target_writers_total_gauge: AtomicU64,
+    me_floor_cap_block_total: AtomicU64,
+    me_floor_swap_idle_total: AtomicU64,
+    me_floor_swap_idle_failed_total: AtomicU64,
     me_handshake_error_codes: DashMap<i32, AtomicU64>,
     me_route_drop_no_conn: AtomicU64,
     me_route_drop_channel_closed: AtomicU64,
@@ -676,6 +684,52 @@ impl Stats {
                 .fetch_add(1, Ordering::Relaxed);
         }
     }
+    pub fn set_me_floor_cpu_cores_detected_gauge(&self, value: u64) {
+        if self.telemetry_me_allows_normal() {
+            self.me_floor_cpu_cores_detected_gauge
+                .store(value, Ordering::Relaxed);
+        }
+    }
+    pub fn set_me_floor_cpu_cores_effective_gauge(&self, value: u64) {
+        if self.telemetry_me_allows_normal() {
+            self.me_floor_cpu_cores_effective_gauge
+                .store(value, Ordering::Relaxed);
+        }
+    }
+    pub fn set_me_floor_global_cap_raw_gauge(&self, value: u64) {
+        if self.telemetry_me_allows_normal() {
+            self.me_floor_global_cap_raw_gauge
+                .store(value, Ordering::Relaxed);
+        }
+    }
+    pub fn set_me_floor_global_cap_effective_gauge(&self, value: u64) {
+        if self.telemetry_me_allows_normal() {
+            self.me_floor_global_cap_effective_gauge
+                .store(value, Ordering::Relaxed);
+        }
+    }
+    pub fn set_me_floor_target_writers_total_gauge(&self, value: u64) {
+        if self.telemetry_me_allows_normal() {
+            self.me_floor_target_writers_total_gauge
+                .store(value, Ordering::Relaxed);
+        }
+    }
+    pub fn increment_me_floor_cap_block_total(&self) {
+        if self.telemetry_me_allows_normal() {
+            self.me_floor_cap_block_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    pub fn increment_me_floor_swap_idle_total(&self) {
+        if self.telemetry_me_allows_normal() {
+            self.me_floor_swap_idle_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    pub fn increment_me_floor_swap_idle_failed_total(&self) {
+        if self.telemetry_me_allows_normal() {
+            self.me_floor_swap_idle_failed_total
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
     pub fn get_connects_all(&self) -> u64 { self.connects_all.load(Ordering::Relaxed) }
     pub fn get_connects_bad(&self) -> u64 { self.connects_bad.load(Ordering::Relaxed) }
     pub fn get_current_connections_direct(&self) -> u64 {
@@ -780,6 +834,34 @@ impl Stats {
     pub fn get_me_floor_mode_switch_adaptive_to_static_total(&self) -> u64 {
         self.me_floor_mode_switch_adaptive_to_static_total
             .load(Ordering::Relaxed)
+    }
+    pub fn get_me_floor_cpu_cores_detected_gauge(&self) -> u64 {
+        self.me_floor_cpu_cores_detected_gauge
+            .load(Ordering::Relaxed)
+    }
+    pub fn get_me_floor_cpu_cores_effective_gauge(&self) -> u64 {
+        self.me_floor_cpu_cores_effective_gauge
+            .load(Ordering::Relaxed)
+    }
+    pub fn get_me_floor_global_cap_raw_gauge(&self) -> u64 {
+        self.me_floor_global_cap_raw_gauge.load(Ordering::Relaxed)
+    }
+    pub fn get_me_floor_global_cap_effective_gauge(&self) -> u64 {
+        self.me_floor_global_cap_effective_gauge
+            .load(Ordering::Relaxed)
+    }
+    pub fn get_me_floor_target_writers_total_gauge(&self) -> u64 {
+        self.me_floor_target_writers_total_gauge
+            .load(Ordering::Relaxed)
+    }
+    pub fn get_me_floor_cap_block_total(&self) -> u64 {
+        self.me_floor_cap_block_total.load(Ordering::Relaxed)
+    }
+    pub fn get_me_floor_swap_idle_total(&self) -> u64 {
+        self.me_floor_swap_idle_total.load(Ordering::Relaxed)
+    }
+    pub fn get_me_floor_swap_idle_failed_total(&self) -> u64 {
+        self.me_floor_swap_idle_failed_total.load(Ordering::Relaxed)
     }
     pub fn get_me_handshake_error_code_counts(&self) -> Vec<(i32, u64)> {
         let mut out: Vec<(i32, u64)> = self

@@ -968,6 +968,133 @@ async fn render_metrics(stats: &Stats, config: &ProxyConfig, ip_tracker: &UserIp
             0
         }
     );
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_adaptive_floor_cpu_cores_detected Runtime detected logical CPU cores for adaptive floor"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_adaptive_floor_cpu_cores_detected gauge"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_adaptive_floor_cpu_cores_detected {}",
+        if me_allows_normal {
+            stats.get_me_floor_cpu_cores_detected_gauge()
+        } else {
+            0
+        }
+    );
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_adaptive_floor_cpu_cores_effective Runtime effective logical CPU cores for adaptive floor"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_adaptive_floor_cpu_cores_effective gauge"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_adaptive_floor_cpu_cores_effective {}",
+        if me_allows_normal {
+            stats.get_me_floor_cpu_cores_effective_gauge()
+        } else {
+            0
+        }
+    );
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_adaptive_floor_global_cap_raw Runtime raw global adaptive floor cap"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_adaptive_floor_global_cap_raw gauge"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_adaptive_floor_global_cap_raw {}",
+        if me_allows_normal {
+            stats.get_me_floor_global_cap_raw_gauge()
+        } else {
+            0
+        }
+    );
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_adaptive_floor_global_cap_effective Runtime effective global adaptive floor cap"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_adaptive_floor_global_cap_effective gauge"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_adaptive_floor_global_cap_effective {}",
+        if me_allows_normal {
+            stats.get_me_floor_global_cap_effective_gauge()
+        } else {
+            0
+        }
+    );
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_adaptive_floor_target_writers_total Runtime adaptive floor target writers total"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_adaptive_floor_target_writers_total gauge"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_adaptive_floor_target_writers_total {}",
+        if me_allows_normal {
+            stats.get_me_floor_target_writers_total_gauge()
+        } else {
+            0
+        }
+    );
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_floor_cap_block_total Reconnect attempts blocked by adaptive floor caps"
+    );
+    let _ = writeln!(out, "# TYPE telemt_me_floor_cap_block_total counter");
+    let _ = writeln!(
+        out,
+        "telemt_me_floor_cap_block_total {}",
+        if me_allows_normal {
+            stats.get_me_floor_cap_block_total()
+        } else {
+            0
+        }
+    );
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_floor_swap_idle_total Adaptive floor cap recovery via idle writer swap"
+    );
+    let _ = writeln!(out, "# TYPE telemt_me_floor_swap_idle_total counter");
+    let _ = writeln!(
+        out,
+        "telemt_me_floor_swap_idle_total {}",
+        if me_allows_normal {
+            stats.get_me_floor_swap_idle_total()
+        } else {
+            0
+        }
+    );
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_floor_swap_idle_failed_total Failed idle swap attempts under adaptive floor caps"
+    );
+    let _ = writeln!(out, "# TYPE telemt_me_floor_swap_idle_failed_total counter");
+    let _ = writeln!(
+        out,
+        "telemt_me_floor_swap_idle_failed_total {}",
+        if me_allows_normal {
+            stats.get_me_floor_swap_idle_failed_total()
+        } else {
+            0
+        }
+    );
 
     let _ = writeln!(out, "# HELP telemt_secure_padding_invalid_total Invalid secure frame lengths");
     let _ = writeln!(out, "# TYPE telemt_secure_padding_invalid_total counter");

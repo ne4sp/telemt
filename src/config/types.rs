@@ -520,9 +520,30 @@ pub struct GeneralConfig {
     #[serde(default = "default_me_adaptive_floor_min_writers_single_endpoint")]
     pub me_adaptive_floor_min_writers_single_endpoint: u8,
 
+    /// Minimum writer target for multi-endpoint DC groups in adaptive floor mode.
+    #[serde(default = "default_me_adaptive_floor_min_writers_multi_endpoint")]
+    pub me_adaptive_floor_min_writers_multi_endpoint: u8,
+
     /// Grace period in seconds to hold static floor after activity in adaptive mode.
     #[serde(default = "default_me_adaptive_floor_recover_grace_secs")]
     pub me_adaptive_floor_recover_grace_secs: u64,
+
+    /// Global ME writer budget per logical CPU core in adaptive mode.
+    #[serde(default = "default_me_adaptive_floor_writers_per_core_total")]
+    pub me_adaptive_floor_writers_per_core_total: u16,
+
+    /// Override logical CPU core count for adaptive floor calculations.
+    /// Set to 0 to use runtime auto-detection.
+    #[serde(default = "default_me_adaptive_floor_cpu_cores_override")]
+    pub me_adaptive_floor_cpu_cores_override: u16,
+
+    /// Per-core max extra writers above base required floor for single-endpoint DC groups.
+    #[serde(default = "default_me_adaptive_floor_max_extra_writers_single_per_core")]
+    pub me_adaptive_floor_max_extra_writers_single_per_core: u16,
+
+    /// Per-core max extra writers above base required floor for multi-endpoint DC groups.
+    #[serde(default = "default_me_adaptive_floor_max_extra_writers_multi_per_core")]
+    pub me_adaptive_floor_max_extra_writers_multi_per_core: u16,
 
     /// Connect attempts for the selected upstream before returning error/fallback.
     #[serde(default = "default_upstream_connect_retry_attempts")]
@@ -775,7 +796,12 @@ impl Default for GeneralConfig {
             me_floor_mode: MeFloorMode::default(),
             me_adaptive_floor_idle_secs: default_me_adaptive_floor_idle_secs(),
             me_adaptive_floor_min_writers_single_endpoint: default_me_adaptive_floor_min_writers_single_endpoint(),
+            me_adaptive_floor_min_writers_multi_endpoint: default_me_adaptive_floor_min_writers_multi_endpoint(),
             me_adaptive_floor_recover_grace_secs: default_me_adaptive_floor_recover_grace_secs(),
+            me_adaptive_floor_writers_per_core_total: default_me_adaptive_floor_writers_per_core_total(),
+            me_adaptive_floor_cpu_cores_override: default_me_adaptive_floor_cpu_cores_override(),
+            me_adaptive_floor_max_extra_writers_single_per_core: default_me_adaptive_floor_max_extra_writers_single_per_core(),
+            me_adaptive_floor_max_extra_writers_multi_per_core: default_me_adaptive_floor_max_extra_writers_multi_per_core(),
             upstream_connect_retry_attempts: default_upstream_connect_retry_attempts(),
             upstream_connect_retry_backoff_ms: default_upstream_connect_retry_backoff_ms(),
             upstream_connect_budget_ms: default_upstream_connect_budget_ms(),

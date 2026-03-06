@@ -60,7 +60,12 @@ pub(super) struct EffectiveMiddleProxyLimits {
     pub(super) floor_mode: &'static str,
     pub(super) adaptive_floor_idle_secs: u64,
     pub(super) adaptive_floor_min_writers_single_endpoint: u8,
+    pub(super) adaptive_floor_min_writers_multi_endpoint: u8,
     pub(super) adaptive_floor_recover_grace_secs: u64,
+    pub(super) adaptive_floor_writers_per_core_total: u16,
+    pub(super) adaptive_floor_cpu_cores_override: u16,
+    pub(super) adaptive_floor_max_extra_writers_single_per_core: u16,
+    pub(super) adaptive_floor_max_extra_writers_multi_per_core: u16,
     pub(super) reconnect_max_concurrent_per_dc: u32,
     pub(super) reconnect_backoff_base_ms: u64,
     pub(super) reconnect_backoff_cap_ms: u64,
@@ -183,7 +188,22 @@ pub(super) fn build_limits_effective_data(cfg: &ProxyConfig) -> EffectiveLimitsD
             adaptive_floor_min_writers_single_endpoint: cfg
                 .general
                 .me_adaptive_floor_min_writers_single_endpoint,
+            adaptive_floor_min_writers_multi_endpoint: cfg
+                .general
+                .me_adaptive_floor_min_writers_multi_endpoint,
             adaptive_floor_recover_grace_secs: cfg.general.me_adaptive_floor_recover_grace_secs,
+            adaptive_floor_writers_per_core_total: cfg
+                .general
+                .me_adaptive_floor_writers_per_core_total,
+            adaptive_floor_cpu_cores_override: cfg
+                .general
+                .me_adaptive_floor_cpu_cores_override,
+            adaptive_floor_max_extra_writers_single_per_core: cfg
+                .general
+                .me_adaptive_floor_max_extra_writers_single_per_core,
+            adaptive_floor_max_extra_writers_multi_per_core: cfg
+                .general
+                .me_adaptive_floor_max_extra_writers_multi_per_core,
             reconnect_max_concurrent_per_dc: cfg.general.me_reconnect_max_concurrent_per_dc,
             reconnect_backoff_base_ms: cfg.general.me_reconnect_backoff_base_ms,
             reconnect_backoff_cap_ms: cfg.general.me_reconnect_backoff_cap_ms,
