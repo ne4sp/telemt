@@ -349,6 +349,10 @@ async fn get_minimal_payload_cached(
                 available_endpoints: entry.available_endpoints,
                 available_pct: entry.available_pct,
                 required_writers: entry.required_writers,
+                floor_min: entry.floor_min,
+                floor_target: entry.floor_target,
+                floor_max: entry.floor_max,
+                floor_capped: entry.floor_capped,
                 alive_writers: entry.alive_writers,
                 coverage_pct: entry.coverage_pct,
                 rtt_ms: entry.rtt_ms,
@@ -366,7 +370,21 @@ async fn get_minimal_payload_cached(
         adaptive_floor_idle_secs: runtime.adaptive_floor_idle_secs,
         adaptive_floor_min_writers_single_endpoint: runtime
             .adaptive_floor_min_writers_single_endpoint,
+        adaptive_floor_min_writers_multi_endpoint: runtime
+            .adaptive_floor_min_writers_multi_endpoint,
         adaptive_floor_recover_grace_secs: runtime.adaptive_floor_recover_grace_secs,
+        adaptive_floor_writers_per_core_total: runtime
+            .adaptive_floor_writers_per_core_total,
+        adaptive_floor_cpu_cores_override: runtime.adaptive_floor_cpu_cores_override,
+        adaptive_floor_max_extra_writers_single_per_core: runtime
+            .adaptive_floor_max_extra_writers_single_per_core,
+        adaptive_floor_max_extra_writers_multi_per_core: runtime
+            .adaptive_floor_max_extra_writers_multi_per_core,
+        adaptive_floor_cpu_cores_detected: runtime.adaptive_floor_cpu_cores_detected,
+        adaptive_floor_cpu_cores_effective: runtime.adaptive_floor_cpu_cores_effective,
+        adaptive_floor_global_cap_raw: runtime.adaptive_floor_global_cap_raw,
+        adaptive_floor_global_cap_effective: runtime.adaptive_floor_global_cap_effective,
+        adaptive_floor_target_writers_total: runtime.adaptive_floor_target_writers_total,
         me_keepalive_enabled: runtime.me_keepalive_enabled,
         me_keepalive_interval_secs: runtime.me_keepalive_interval_secs,
         me_keepalive_jitter_secs: runtime.me_keepalive_jitter_secs,

@@ -312,6 +312,21 @@ impl ProxyConfig {
             ));
         }
 
+        if config.general.me_adaptive_floor_min_writers_multi_endpoint == 0
+            || config.general.me_adaptive_floor_min_writers_multi_endpoint > 32
+        {
+            return Err(ProxyError::Config(
+                "general.me_adaptive_floor_min_writers_multi_endpoint must be within [1, 32]"
+                    .to_string(),
+            ));
+        }
+
+        if config.general.me_adaptive_floor_writers_per_core_total == 0 {
+            return Err(ProxyError::Config(
+                "general.me_adaptive_floor_writers_per_core_total must be > 0".to_string(),
+            ));
+        }
+
         if config.general.me_single_endpoint_outage_backoff_min_ms == 0 {
             return Err(ProxyError::Config(
                 "general.me_single_endpoint_outage_backoff_min_ms must be > 0".to_string(),

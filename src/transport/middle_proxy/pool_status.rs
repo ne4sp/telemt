@@ -28,6 +28,10 @@ pub(crate) struct MeApiDcStatusSnapshot {
     pub available_endpoints: usize,
     pub available_pct: f64,
     pub required_writers: usize,
+    pub floor_min: usize,
+    pub floor_target: usize,
+    pub floor_max: usize,
+    pub floor_capped: bool,
     pub alive_writers: usize,
     pub coverage_pct: f64,
     pub rtt_ms: Option<f64>,
@@ -72,7 +76,17 @@ pub(crate) struct MeApiRuntimeSnapshot {
     pub floor_mode: &'static str,
     pub adaptive_floor_idle_secs: u64,
     pub adaptive_floor_min_writers_single_endpoint: u8,
+    pub adaptive_floor_min_writers_multi_endpoint: u8,
     pub adaptive_floor_recover_grace_secs: u64,
+    pub adaptive_floor_writers_per_core_total: u16,
+    pub adaptive_floor_cpu_cores_override: u16,
+    pub adaptive_floor_max_extra_writers_single_per_core: u16,
+    pub adaptive_floor_max_extra_writers_multi_per_core: u16,
+    pub adaptive_floor_cpu_cores_detected: u32,
+    pub adaptive_floor_cpu_cores_effective: u32,
+    pub adaptive_floor_global_cap_raw: u64,
+    pub adaptive_floor_global_cap_effective: u64,
+    pub adaptive_floor_target_writers_total: u64,
     pub me_keepalive_enabled: bool,
     pub me_keepalive_interval_secs: u64,
     pub me_keepalive_jitter_secs: u64,
@@ -275,14 +289,43 @@ impl MePool {
         let mut dcs = Vec::<MeApiDcStatusSnapshot>::with_capacity(endpoints_by_dc.len());
         let mut available_endpoints = 0usize;
         let mut alive_writers = 0usize;
+        let floor_mode = self.floor_mode();
+        let adaptive_cpu_cores = (self
+            .me_adaptive_floor_cpu_cores_effective
+            .load(Ordering::Relaxed) as usize)
+            .max(1);
         for (dc, endpoints) in endpoints_by_dc {
             let endpoint_count = endpoints.len();
             let dc_available_endpoints = endpoints
                 .iter()
                 .filter(|endpoint| live_writers_by_endpoint.contains_key(endpoint))
                 .count();
+            let base_required = self.required_writers_for_dc(endpoint_count);
             let dc_required_writers =
                 self.required_writers_for_dc_with_floor_mode(endpoint_count, false);
+            let floor_min = if endpoint_count <= 1 {
+                (self
+                    .me_adaptive_floor_min_writers_single_endpoint
+                    .load(Ordering::Relaxed) as usize)
+                    .max(1)
+                    .min(base_required.max(1))
+            } else {
+                (self
+                    .me_adaptive_floor_min_writers_multi_endpoint
+                    .load(Ordering::Relaxed) as usize)
+                    .max(1)
+                    .min(base_required.max(1))
+            };
+            let extra_per_core = if endpoint_count <= 1 {
+                self.me_adaptive_floor_max_extra_writers_single_per_core
+                    .load(Ordering::Relaxed) as usize
+            } else {
+                self.me_adaptive_floor_max_extra_writers_multi_per_core
+                    .load(Ordering::Relaxed) as usize
+            };
+            let floor_max = base_required.saturating_add(adaptive_cpu_cores.saturating_mul(extra_per_core));
+            let floor_capped = matches!(floor_mode, MeFloorMode::Adaptive)
+                && dc_required_writers < base_required;
             let dc_alive_writers = live_writers_by_dc.get(&dc).copied().unwrap_or(0);
             let dc_load = activity
                 .active_sessions_by_target_dc
@@ -302,6 +345,10 @@ impl MePool {
                 available_endpoints: dc_available_endpoints,
                 available_pct: ratio_pct(dc_available_endpoints, endpoint_count),
                 required_writers: dc_required_writers,
+                floor_min,
+                floor_target: dc_required_writers,
+                floor_max,
+                floor_capped,
                 alive_writers: dc_alive_writers,
                 coverage_pct: ratio_pct(dc_alive_writers, dc_required_writers),
                 rtt_ms: dc_rtt_ms,
@@ -378,8 +425,38 @@ impl MePool {
             adaptive_floor_min_writers_single_endpoint: self
                 .me_adaptive_floor_min_writers_single_endpoint
                 .load(Ordering::Relaxed),
+            adaptive_floor_min_writers_multi_endpoint: self
+                .me_adaptive_floor_min_writers_multi_endpoint
+                .load(Ordering::Relaxed),
             adaptive_floor_recover_grace_secs: self
                 .me_adaptive_floor_recover_grace_secs
+                .load(Ordering::Relaxed),
+            adaptive_floor_writers_per_core_total: self
+                .me_adaptive_floor_writers_per_core_total
+                .load(Ordering::Relaxed) as u16,
+            adaptive_floor_cpu_cores_override: self
+                .me_adaptive_floor_cpu_cores_override
+                .load(Ordering::Relaxed) as u16,
+            adaptive_floor_max_extra_writers_single_per_core: self
+                .me_adaptive_floor_max_extra_writers_single_per_core
+                .load(Ordering::Relaxed) as u16,
+            adaptive_floor_max_extra_writers_multi_per_core: self
+                .me_adaptive_floor_max_extra_writers_multi_per_core
+                .load(Ordering::Relaxed) as u16,
+            adaptive_floor_cpu_cores_detected: self
+                .me_adaptive_floor_cpu_cores_detected
+                .load(Ordering::Relaxed),
+            adaptive_floor_cpu_cores_effective: self
+                .me_adaptive_floor_cpu_cores_effective
+                .load(Ordering::Relaxed),
+            adaptive_floor_global_cap_raw: self
+                .me_adaptive_floor_global_cap_raw
+                .load(Ordering::Relaxed),
+            adaptive_floor_global_cap_effective: self
+                .me_adaptive_floor_global_cap_effective
+                .load(Ordering::Relaxed),
+            adaptive_floor_target_writers_total: self
+                .me_adaptive_floor_target_writers_total
                 .load(Ordering::Relaxed),
             me_keepalive_enabled: self.me_keepalive_enabled,
             me_keepalive_interval_secs: self.me_keepalive_interval.as_secs(),
