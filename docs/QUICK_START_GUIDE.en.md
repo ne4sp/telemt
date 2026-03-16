@@ -72,6 +72,9 @@ classic = false
 secure = false
 tls = true
 
+[server]
+port = 443
+
 [server.api]
 enabled = true
 # listen = "127.0.0.1:9091"
