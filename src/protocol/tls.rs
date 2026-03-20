@@ -450,7 +450,7 @@ pub fn build_server_hello(
     new_session_tickets: u8,
 ) -> Vec<u8> {
     const MIN_APP_DATA: usize = 64;
-    const MAX_APP_DATA: usize = 16640; // RFC 8446 §5.2 upper bound
+    const MAX_APP_DATA: usize = MAX_TLS_CIPHERTEXT_SIZE;
     let fake_cert_len = fake_cert_len.clamp(MIN_APP_DATA, MAX_APP_DATA);
     let x25519_key = gen_fake_x25519_key(rng);
     

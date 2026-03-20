@@ -111,7 +111,7 @@ fn wrap_tls_application_record(payload: &[u8]) -> Vec<u8> {
 }
 
 fn tls_clienthello_len_in_bounds(tls_len: usize) -> bool {
-    (MIN_TLS_CLIENT_HELLO_SIZE..=MAX_TLS_RECORD_SIZE).contains(&tls_len)
+    (MIN_TLS_CLIENT_HELLO_SIZE..=MAX_TLS_PLAINTEXT_SIZE).contains(&tls_len)
 }
 
 async fn read_with_progress<R: AsyncRead + Unpin>(reader: &mut R, mut buf: &mut [u8]) -> std::io::Result<usize> {
@@ -281,7 +281,7 @@ where
             // incorrectly rejecting compact but spec-compliant ClientHellos from
             // third-party clients or future Telegram versions.
             if !tls_clienthello_len_in_bounds(tls_len) {
-                debug!(peer = %real_peer, tls_len = tls_len, max_tls_len = MAX_TLS_RECORD_SIZE, "TLS handshake length out of bounds");
+                debug!(peer = %real_peer, tls_len = tls_len, max_tls_len = MAX_TLS_PLAINTEXT_SIZE, "TLS handshake length out of bounds");
                 stats.increment_connects_bad();
                 let (reader, writer) = tokio::io::split(stream);
                 handle_bad_client(
@@ -729,7 +729,7 @@ impl RunningClientHandler {
         // incorrectly rejecting compact but spec-compliant ClientHellos from
         // third-party clients or future Telegram versions.
         if !tls_clienthello_len_in_bounds(tls_len) {
-            debug!(peer = %peer, tls_len = tls_len, max_tls_len = MAX_TLS_RECORD_SIZE, "TLS handshake length out of bounds");
+            debug!(peer = %peer, tls_len = tls_len, max_tls_len = MAX_TLS_PLAINTEXT_SIZE, "TLS handshake length out of bounds");
             self.stats.increment_connects_bad();
             let (reader, writer) = self.stream.into_split();
             handle_bad_client(

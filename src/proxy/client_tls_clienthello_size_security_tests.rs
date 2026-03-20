@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::config::{UpstreamConfig, UpstreamType};
-use crate::protocol::constants::{MAX_TLS_RECORD_SIZE, MIN_TLS_CLIENT_HELLO_SIZE};
+use crate::protocol::constants::{MAX_TLS_PLAINTEXT_SIZE, MIN_TLS_CLIENT_HELLO_SIZE};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
@@ -124,7 +124,7 @@ async fn tls_client_hello_lower_bound_minus_one_is_masked_and_counted_bad() {
 
 #[tokio::test]
 async fn tls_client_hello_upper_bound_plus_one_is_masked_and_counted_bad() {
-    run_probe_and_assert_masking(MAX_TLS_RECORD_SIZE + 1, true).await;
+    run_probe_and_assert_masking(MAX_TLS_PLAINTEXT_SIZE + 1, true).await;
 }
 
 #[tokio::test]
@@ -142,9 +142,9 @@ fn tls_client_hello_len_bounds_unit_adversarial_sweep() {
         (101usize, true),
         (511usize, true),
         (512usize, true),
-        (16_383usize, true),
-        (16_384usize, true),
-        (16_385usize, false),
+        (MAX_TLS_PLAINTEXT_SIZE - 1, true),
+        (MAX_TLS_PLAINTEXT_SIZE, true),
+        (MAX_TLS_PLAINTEXT_SIZE + 1, false),
         (u16::MAX as usize, false),
         (usize::MAX, false),
     ];
@@ -168,12 +168,12 @@ fn tls_client_hello_len_bounds_light_fuzz_deterministic_lcg() {
             0 => MIN_TLS_CLIENT_HELLO_SIZE - 1,
             1 => MIN_TLS_CLIENT_HELLO_SIZE,
             2 => MIN_TLS_CLIENT_HELLO_SIZE + 1,
-            3 => MAX_TLS_RECORD_SIZE - 1,
-            4 => MAX_TLS_RECORD_SIZE,
-            5 => MAX_TLS_RECORD_SIZE + 1,
+            3 => MAX_TLS_PLAINTEXT_SIZE - 1,
+            4 => MAX_TLS_PLAINTEXT_SIZE,
+            5 => MAX_TLS_PLAINTEXT_SIZE + 1,
             _ => base,
         };
-        let expect_bad = !(MIN_TLS_CLIENT_HELLO_SIZE..=MAX_TLS_RECORD_SIZE).contains(&len);
+        let expect_bad = !(MIN_TLS_CLIENT_HELLO_SIZE..=MAX_TLS_PLAINTEXT_SIZE).contains(&len);
         assert_eq!(
             tls_clienthello_len_in_bounds(len),
             !expect_bad,
@@ -186,9 +186,9 @@ fn tls_client_hello_len_bounds_light_fuzz_deterministic_lcg() {
 fn tls_client_hello_len_bounds_stress_many_evaluations() {
     for _ in 0..100_000 {
         assert!(tls_clienthello_len_in_bounds(MIN_TLS_CLIENT_HELLO_SIZE));
-        assert!(tls_clienthello_len_in_bounds(MAX_TLS_RECORD_SIZE));
+        assert!(tls_clienthello_len_in_bounds(MAX_TLS_PLAINTEXT_SIZE));
         assert!(!tls_clienthello_len_in_bounds(MIN_TLS_CLIENT_HELLO_SIZE - 1));
-        assert!(!tls_clienthello_len_in_bounds(MAX_TLS_RECORD_SIZE + 1));
+        assert!(!tls_clienthello_len_in_bounds(MAX_TLS_PLAINTEXT_SIZE + 1));
     }
 }
 

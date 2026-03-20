@@ -3335,8 +3335,8 @@ async fn oversized_tls_record_is_masked_in_generic_stream_pipeline() {
         0x16,
         0x03,
         0x01,
-        (((MAX_TLS_RECORD_SIZE + 1) >> 8) & 0xff) as u8,
-        ((MAX_TLS_RECORD_SIZE + 1) & 0xff) as u8,
+        (((MAX_TLS_PLAINTEXT_SIZE + 1) >> 8) & 0xff) as u8,
+        ((MAX_TLS_PLAINTEXT_SIZE + 1) & 0xff) as u8,
     ];
     let backend_reply = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".to_vec();
 
@@ -3438,8 +3438,8 @@ async fn oversized_tls_record_is_masked_in_client_handler_pipeline() {
         0x16,
         0x03,
         0x01,
-        (((MAX_TLS_RECORD_SIZE + 1) >> 8) & 0xff) as u8,
-        ((MAX_TLS_RECORD_SIZE + 1) & 0xff) as u8,
+        (((MAX_TLS_PLAINTEXT_SIZE + 1) >> 8) & 0xff) as u8,
+        ((MAX_TLS_PLAINTEXT_SIZE + 1) & 0xff) as u8,
     ];
     let backend_reply = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n".to_vec();
 
@@ -3769,7 +3769,7 @@ async fn tls_record_len_16384_is_accepted_in_generic_stream_pipeline() {
     let backend_addr = listener.local_addr().unwrap();
 
     let secret = [0x55u8; 16];
-    let client_hello = make_valid_tls_client_hello_with_len(&secret, 0, MAX_TLS_RECORD_SIZE);
+    let client_hello = make_valid_tls_client_hello_with_len(&secret, 0, MAX_TLS_PLAINTEXT_SIZE);
 
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;
@@ -3865,7 +3865,7 @@ async fn tls_record_len_16384_is_accepted_in_client_handler_pipeline() {
     let front_addr = front_listener.local_addr().unwrap();
 
     let secret = [0x66u8; 16];
-    let client_hello = make_valid_tls_client_hello_with_len(&secret, 0, MAX_TLS_RECORD_SIZE);
+    let client_hello = make_valid_tls_client_hello_with_len(&secret, 0, MAX_TLS_PLAINTEXT_SIZE);
 
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;

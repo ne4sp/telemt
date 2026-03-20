@@ -1,12 +1,13 @@
 use crate::crypto::{sha256_hmac, SecureRandom};
 use crate::protocol::constants::{
+    MAX_TLS_CIPHERTEXT_SIZE,
     TLS_RECORD_APPLICATION, TLS_RECORD_CHANGE_CIPHER, TLS_RECORD_HANDSHAKE, TLS_VERSION,
 };
 use crate::protocol::tls::{TLS_DIGEST_LEN, TLS_DIGEST_POS, gen_fake_x25519_key};
 use crate::tls_front::types::{CachedTlsData, ParsedCertificateInfo, TlsProfileSource};
 
 const MIN_APP_DATA: usize = 64;
-const MAX_APP_DATA: usize = 16640; // RFC 8446 §5.2 allows up to 2^14 + 256
+const MAX_APP_DATA: usize = MAX_TLS_CIPHERTEXT_SIZE;
 
 fn jitter_and_clamp_sizes(sizes: &[usize], rng: &SecureRandom) -> Vec<usize> {
     sizes

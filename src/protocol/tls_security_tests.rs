@@ -1189,7 +1189,7 @@ fn test_parse_tls_record_header() {
     let header = [0x17, 0x03, 0x03, 0x40, 0x00];
     let result = parse_tls_record_header(&header).unwrap();
     assert_eq!(result.0, TLS_RECORD_APPLICATION);
-    assert_eq!(result.1, 16384);
+    assert_eq!(usize::from(result.1), MAX_TLS_PLAINTEXT_SIZE);
 }
 
 #[test]
@@ -1887,7 +1887,7 @@ fn server_hello_clamps_fake_cert_len_upper_bound() {
     let app_len = u16::from_be_bytes([response[app_pos + 3], response[app_pos + 4]]) as usize;
 
     assert_eq!(response[app_pos], TLS_RECORD_APPLICATION);
-    assert_eq!(app_len, 16_640, "fake cert payload must be clamped to TLS record max bound");
+    assert_eq!(app_len, MAX_TLS_CIPHERTEXT_SIZE, "fake cert payload must be clamped to TLS record max bound");
 }
 
 #[test]

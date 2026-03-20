@@ -1,7 +1,7 @@
 use super::*;
 use crate::config::{UpstreamConfig, UpstreamType};
 use crate::crypto::sha256_hmac;
-use crate::protocol::constants::{HANDSHAKE_LEN, MAX_TLS_CHUNK_SIZE, TLS_VERSION};
+use crate::protocol::constants::{HANDSHAKE_LEN, MAX_TLS_CIPHERTEXT_SIZE, TLS_VERSION};
 use crate::protocol::tls;
 use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -347,7 +347,7 @@ async fn tls_bad_mtproto_fallback_forwards_max_tls_record_verbatim() {
     let client_hello = make_valid_tls_client_hello(&secret, 3, 600, 0x45);
     let invalid_mtproto = vec![0u8; HANDSHAKE_LEN];
     let invalid_mtproto_record = wrap_tls_application_data(&invalid_mtproto);
-    let trailing_payload = vec![0xAB; MAX_TLS_CHUNK_SIZE];
+    let trailing_payload = vec![0xAB; MAX_TLS_CIPHERTEXT_SIZE];
     let trailing_record = wrap_tls_application_data(&trailing_payload);
 
     let expected_client_hello = client_hello.clone();
@@ -1786,7 +1786,7 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_max_payload_is_forwarded() {
 
     let secret = [0xA5u8; 16];
     let client_hello = make_valid_tls_client_hello(&secret, 304, 600, 0x35);
-    let coalesced_tail = vec![0xEF; MAX_TLS_CHUNK_SIZE - HANDSHAKE_LEN];
+    let coalesced_tail = vec![0xEF; MAX_TLS_CIPHERTEXT_SIZE - HANDSHAKE_LEN];
     let coalesced_record = wrap_invalid_mtproto_with_coalesced_tail(&coalesced_tail);
     let expected_tail_record = wrap_tls_application_data(&coalesced_tail);
 
