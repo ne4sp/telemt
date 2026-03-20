@@ -47,8 +47,56 @@ use crate::transport::UpstreamManager;
 use crate::transport::middle_proxy::MePool;
 use helpers::{parse_cli, resolve_runtime_config_path};
 
+#[cfg(unix)]
+use crate::daemon::{DaemonOptions, PidFile, drop_privileges};
+
 /// Runs the full telemt runtime startup pipeline and blocks until shutdown.
+///
+/// On Unix, daemon options should be handled before calling this function
+/// (daemonization must happen before tokio runtime starts).
+#[cfg(unix)]
+pub async fn run_with_daemon(
+    daemon_opts: DaemonOptions,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    run_inner(daemon_opts).await
+}
+
+/// Runs the full telemt runtime startup pipeline and blocks until shutdown.
+///
+/// This is the main entry point for non-daemon mode or when called as a library.
+#[allow(dead_code)]
 pub async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    #[cfg(unix)]
+    {
+        // Parse CLI to get daemon options even in simple run() path
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let daemon_opts = crate::cli::parse_daemon_args(&args);
+        run_inner(daemon_opts).await
+    }
+    #[cfg(not(unix))]
+    {
+        run_inner().await
+    }
+}
+
+#[cfg(unix)]
+async fn run_inner(
+    daemon_opts: DaemonOptions,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+
+    // Acquire PID file if daemonizing or if explicitly requested
+    // Keep it alive until shutdown (underscore prefix = intentionally kept for RAII cleanup)
+    let _pid_file = if daemon_opts.daemonize || daemon_opts.pid_file.is_some() {
+        let mut pf = PidFile::new(daemon_opts.pid_file_path());
+        if let Err(e) = pf.acquire() {
+            eprintln!("[telemt] {}", e);
+            std::process::exit(1);
+        }
+        Some(pf)
+    } else {
+        None
+    };
+
     let process_started_at = Instant::now();
     let process_started_at_epoch_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -61,7 +109,11 @@ pub async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             Some("load and validate config".to_string()),
         )
         .await;
-    let (config_path_cli, data_path, cli_silent, cli_log_level) = parse_cli();
+    let cli_args = parse_cli();
+    let config_path_cli = cli_args.config_path;
+    let data_path = cli_args.data_path;
+    let cli_silent = cli_args.silent;
+    let cli_log_level = cli_args.log_level;
     let startup_cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -583,6 +635,17 @@ pub async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if listeners.is_empty() && !has_unix_listener {
         error!("No listeners. Exiting.");
         std::process::exit(1);
+    }
+
+    // Drop privileges after binding sockets (which may require root for port < 1024)
+    if daemon_opts.user.is_some() || daemon_opts.group.is_some() {
+        if let Err(e) = drop_privileges(
+            daemon_opts.user.as_deref(),
+            daemon_opts.group.as_deref(),
+        ) {
+            error!(error = %e, "Failed to drop privileges");
+            std::process::exit(1);
+        }
     }
 
     runtime_tasks::apply_runtime_log_filter(

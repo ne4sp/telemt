@@ -25,7 +25,15 @@ pub(crate) fn resolve_runtime_config_path(
     absolute.canonicalize().unwrap_or(absolute)
 }
 
-pub(crate) fn parse_cli() -> (String, Option<PathBuf>, bool, Option<String>) {
+/// Parsed CLI arguments.
+pub(crate) struct CliArgs {
+    pub config_path: String,
+    pub data_path: Option<PathBuf>,
+    pub silent: bool,
+    pub log_level: Option<String>,
+}
+
+pub(crate) fn parse_cli() -> CliArgs {
     let mut config_path = "config.toml".to_string();
     let mut data_path: Option<PathBuf> = None;
     let mut silent = false;
@@ -72,35 +80,34 @@ pub(crate) fn parse_cli() -> (String, Option<PathBuf>, bool, Option<String>) {
                 log_level = Some(s.trim_start_matches("--log-level=").to_string());
             }
             "--help" | "-h" => {
-                eprintln!("Usage: telemt [config.toml] [OPTIONS]");
-                eprintln!();
-                eprintln!("Options:");
-                eprintln!(
-                    "  --data-path <DIR>       Set data directory (absolute path; overrides config value)"
-                );
-                eprintln!("  --silent, -s            Suppress info logs");
-                eprintln!("  --log-level <LEVEL>     debug|verbose|normal|silent");
-                eprintln!("  --help, -h              Show this help");
-                eprintln!();
-                eprintln!("Setup (fire-and-forget):");
-                eprintln!(
-                    "  --init                  Generate config, install systemd service, start"
-                );
-                eprintln!("    --port <PORT>          Listen port (default: 443)");
-                eprintln!(
-                    "    --domain <DOMAIN>      TLS domain for masking (default: www.google.com)"
-                );
-                eprintln!(
-                    "    --secret <HEX>         32-char hex secret (auto-generated if omitted)"
-                );
-                eprintln!("    --user <NAME>          Username (default: user)");
-                eprintln!("    --config-dir <DIR>     Config directory (default: /etc/telemt)");
-                eprintln!("    --no-start             Don't start the service after install");
+                print_help();
                 std::process::exit(0);
             }
             "--version" | "-V" => {
                 println!("telemt {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
+            }
+            // Skip daemon-related flags (already parsed)
+            "--daemon" | "-d" | "--foreground" | "-f" => {}
+            s if s.starts_with("--pid-file") => {
+                if !s.contains('=') {
+                    i += 1; // skip value
+                }
+            }
+            s if s.starts_with("--run-as-user") => {
+                if !s.contains('=') {
+                    i += 1;
+                }
+            }
+            s if s.starts_with("--run-as-group") => {
+                if !s.contains('=') {
+                    i += 1;
+                }
+            }
+            s if s.starts_with("--working-dir") => {
+                if !s.contains('=') {
+                    i += 1;
+                }
             }
             s if !s.starts_with('-') => {
                 config_path = s.to_string();
@@ -112,7 +119,49 @@ pub(crate) fn parse_cli() -> (String, Option<PathBuf>, bool, Option<String>) {
         i += 1;
     }
 
-    (config_path, data_path, silent, log_level)
+    CliArgs {
+        config_path,
+        data_path,
+        silent,
+        log_level,
+    }
+}
+
+fn print_help() {
+    eprintln!("Usage: telemt [config.toml] [OPTIONS]");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  --data-path <DIR>       Set data directory (absolute path; overrides config value)");
+    eprintln!("  --silent, -s            Suppress info logs");
+    eprintln!("  --log-level <LEVEL>     debug|verbose|normal|silent");
+    eprintln!("  --help, -h              Show this help");
+    eprintln!("  --version, -V           Show version");
+    eprintln!();
+    #[cfg(unix)]
+    {
+        eprintln!("Daemon options (Unix only):");
+        eprintln!("  --daemon, -d            Fork to background (daemonize)");
+        eprintln!("  --foreground, -f        Explicit foreground mode (for systemd)");
+        eprintln!("  --pid-file <PATH>       PID file path (default: /var/run/telemt.pid)");
+        eprintln!("  --run-as-user <USER>    Drop privileges to this user after binding");
+        eprintln!("  --run-as-group <GROUP>  Drop privileges to this group after binding");
+        eprintln!("  --working-dir <DIR>     Working directory for daemon mode");
+        eprintln!();
+    }
+    eprintln!("Setup (fire-and-forget):");
+    eprintln!(
+        "  --init                  Generate config, install systemd service, start"
+    );
+    eprintln!("    --port <PORT>          Listen port (default: 443)");
+    eprintln!(
+        "    --domain <DOMAIN>      TLS domain for masking (default: www.google.com)"
+    );
+    eprintln!(
+        "    --secret <HEX>         32-char hex secret (auto-generated if omitted)"
+    );
+    eprintln!("    --user <NAME>          Username (default: user)");
+    eprintln!("    --config-dir <DIR>     Config directory (default: /etc/telemt)");
+    eprintln!("    --no-start             Don't start the service after install");
 }
 
 #[cfg(test)]

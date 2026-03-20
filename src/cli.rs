@@ -1,9 +1,12 @@
-//! CLI commands: --init (fire-and-forget setup)
+//! CLI commands: --init (fire-and-forget setup), daemon options
 
 use rand::RngExt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[cfg(unix)]
+use crate::daemon::DaemonOptions;
 
 /// Options for the init command
 pub struct InitOptions {
@@ -13,6 +16,64 @@ pub struct InitOptions {
     pub username: String,
     pub config_dir: PathBuf,
     pub no_start: bool,
+}
+
+/// Parse daemon-related options from CLI args.
+#[cfg(unix)]
+pub fn parse_daemon_args(args: &[String]) -> DaemonOptions {
+    let mut opts = DaemonOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--daemon" | "-d" => {
+                opts.daemonize = true;
+            }
+            "--foreground" | "-f" => {
+                opts.foreground = true;
+            }
+            "--pid-file" => {
+                i += 1;
+                if i < args.len() {
+                    opts.pid_file = Some(PathBuf::from(&args[i]));
+                }
+            }
+            s if s.starts_with("--pid-file=") => {
+                opts.pid_file = Some(PathBuf::from(s.trim_start_matches("--pid-file=")));
+            }
+            "--run-as-user" => {
+                i += 1;
+                if i < args.len() {
+                    opts.user = Some(args[i].clone());
+                }
+            }
+            s if s.starts_with("--run-as-user=") => {
+                opts.user = Some(s.trim_start_matches("--run-as-user=").to_string());
+            }
+            "--run-as-group" => {
+                i += 1;
+                if i < args.len() {
+                    opts.group = Some(args[i].clone());
+                }
+            }
+            s if s.starts_with("--run-as-group=") => {
+                opts.group = Some(s.trim_start_matches("--run-as-group=").to_string());
+            }
+            "--working-dir" => {
+                i += 1;
+                if i < args.len() {
+                    opts.working_dir = Some(PathBuf::from(&args[i]));
+                }
+            }
+            s if s.starts_with("--working-dir=") => {
+                opts.working_dir = Some(PathBuf::from(s.trim_start_matches("--working-dir=")));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    opts
 }
 
 impl Default for InitOptions {
