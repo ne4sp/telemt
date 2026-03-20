@@ -1,6 +1,6 @@
 [package]
 name = "telemt"
-version = "3.3.27"
+version = "4.3.27-David"
 edition = "2024"
 
 [dependencies]
