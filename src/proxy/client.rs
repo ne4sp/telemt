@@ -317,6 +317,13 @@ fn record_handshake_failure_class(
     record_beobachten_class(beobachten, config, peer_ip, class);
 }
 
+#[inline]
+fn increment_bad_on_unknown_tls_sni(stats: &Stats, error: &ProxyError) {
+    if matches!(error, ProxyError::UnknownTlsSni) {
+        stats.increment_connects_bad();
+    }
+}
+
 fn is_trusted_proxy_source(peer_ip: IpAddr, trusted: &[IpNetwork]) -> bool {
     if trusted.is_empty() {
         static EMPTY_PROXY_TRUST_WARNED: OnceLock<AtomicBool> = OnceLock::new();
@@ -508,7 +515,10 @@ where
                         beobachten.clone(),
                     ));
                 }
-                HandshakeResult::Error(e) => return Err(e),
+                HandshakeResult::Error(e) => {
+                    increment_bad_on_unknown_tls_sni(stats.as_ref(), &e);
+                    return Err(e);
+                }
             };
 
             debug!(peer = %peer, "Reading MTProto handshake through TLS");
@@ -959,7 +969,10 @@ impl RunningClientHandler {
                     self.beobachten.clone(),
                 ));
             }
-            HandshakeResult::Error(e) => return Err(e),
+            HandshakeResult::Error(e) => {
+                increment_bad_on_unknown_tls_sni(stats.as_ref(), &e);
+                return Err(e);
+            }
         };
 
         debug!(peer = %peer, "Reading MTProto handshake through TLS");

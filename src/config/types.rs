@@ -1359,6 +1359,14 @@ impl Default for TimeoutsConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UnknownSniAction {
+    #[default]
+    Drop,
+    Mask,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AntiCensorshipConfig {
     #[serde(default = "default_tls_domain")]
@@ -1367,6 +1375,10 @@ pub struct AntiCensorshipConfig {
     /// Additional TLS domains for generating multiple proxy links.
     #[serde(default)]
     pub tls_domains: Vec<String>,
+
+    /// Policy for TLS ClientHello with unknown (non-configured) SNI.
+    #[serde(default)]
+    pub unknown_sni_action: UnknownSniAction,
 
     /// Upstream scope used for TLS front metadata fetches.
     /// Empty value keeps default upstream routing behavior.
@@ -1478,6 +1490,7 @@ impl Default for AntiCensorshipConfig {
         Self {
             tls_domain: default_tls_domain(),
             tls_domains: Vec::new(),
+            unknown_sni_action: UnknownSniAction::Drop,
             tls_fetch_scope: default_tls_fetch_scope(),
             mask: default_true(),
             mask_host: None,

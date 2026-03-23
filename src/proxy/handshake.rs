@@ -16,7 +16,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, trace, warn};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::config::ProxyConfig;
+use crate::config::{ProxyConfig, UnknownSniAction};
 use crate::crypto::{AesCtr, SecureRandom, sha256};
 use crate::error::{HandshakeResult, ProxyError};
 use crate::protocol::constants::*;
@@ -510,6 +510,21 @@ fn decode_user_secrets(
     secrets
 }
 
+#[inline]
+fn find_matching_tls_domain<'a>(config: &'a ProxyConfig, sni: &str) -> Option<&'a str> {
+    if config.censorship.tls_domain.eq_ignore_ascii_case(sni) {
+        return Some(config.censorship.tls_domain.as_str());
+    }
+
+    for domain in &config.censorship.tls_domains {
+        if domain.eq_ignore_ascii_case(sni) {
+            return Some(domain.as_str());
+        }
+    }
+
+    None
+}
+
 async fn maybe_apply_server_hello_delay(config: &ProxyConfig) {
     if config.censorship.server_hello_delay_max_ms == 0 {
         return;
@@ -593,6 +608,25 @@ where
     }
 
     let client_sni = tls::extract_sni_from_client_hello(handshake);
+    let matched_tls_domain = client_sni
+        .as_deref()
+        .and_then(|sni| find_matching_tls_domain(config, sni));
+
+    if client_sni.is_some() && matched_tls_domain.is_none() {
+        auth_probe_record_failure(peer.ip(), Instant::now());
+        maybe_apply_server_hello_delay(config).await;
+        debug!(
+            peer = %peer,
+            sni = ?client_sni,
+            action = ?config.censorship.unknown_sni_action,
+            "TLS handshake rejected by unknown SNI policy"
+        );
+        return match config.censorship.unknown_sni_action {
+            UnknownSniAction::Drop => HandshakeResult::Error(ProxyError::UnknownTlsSni),
+            UnknownSniAction::Mask => HandshakeResult::BadClient { reader, writer },
+        };
+    }
+
     let secrets = decode_user_secrets(config, client_sni.as_deref());
 
     let validation = match tls::validate_tls_handshake_with_replay_window(
@@ -633,16 +667,8 @@ where
 
     let cached = if config.censorship.tls_emulation {
         if let Some(cache) = tls_cache.as_ref() {
-            let selected_domain = if let Some(sni) = client_sni.as_ref() {
-                if cache.contains_domain(sni).await {
-                    sni.clone()
-                } else {
-                    config.censorship.tls_domain.clone()
-                }
-            } else {
-                config.censorship.tls_domain.clone()
-            };
-            let cached_entry = cache.get(&selected_domain).await;
+            let selected_domain = matched_tls_domain.unwrap_or(config.censorship.tls_domain.as_str());
+            let cached_entry = cache.get(selected_domain).await;
             let use_full_cert_payload = cache
                 .take_full_cert_budget_for_ip(
                     peer.ip(),
