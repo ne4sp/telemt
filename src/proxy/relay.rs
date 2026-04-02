@@ -58,7 +58,7 @@ use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf, copy_bidirectional_with_sizes};
 use tokio::time::Instant;
@@ -136,6 +136,92 @@ impl<R: Unpin, W: AsyncWrite + Unpin> AsyncWrite for CombinedStream<R, W> {
     #[inline]
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.get_mut().writer).poll_shutdown(cx)
+    }
+}
+
+// ============= DrsWriter (Dynamic Record Sizing) =============
+//
+// Shapes the stream of ciphertext bytes passed into FakeTlsWriter so each
+// `poll_write` to the TLS framer matches browser-like TLS application data
+// chunk sizes. This targets L4 segment patterns seen by DPI, not TCP cwnd
+// (which the proxy does not control).
+//
+// First-stage cap (1369) keeps each FakeTLS record (5-byte header + payload)
+// safely under typical MSS after extra TCP options or tunnel overhead.
+
+/// AsyncWrite adapter that limits per-record ciphertext volume before FakeTLS framing.
+pub struct DrsWriter<W> {
+    inner: W,
+    enabled: bool,
+    bytes_in_current_record: usize,
+    records_completed: usize,
+}
+
+impl<W> DrsWriter<W> {
+    /// Wraps `inner`. When `enabled` is false, all I/O delegates without sizing logic.
+    pub fn new(inner: W, enabled: bool) -> Self {
+        Self {
+            inner,
+            enabled,
+            bytes_in_current_record: 0,
+            records_completed: 0,
+        }
+    }
+
+    fn target_record_size(&self) -> usize {
+        match self.records_completed {
+            0..=39 => 1_369,
+            40..=59 => 4_096,
+            _ => 16_384,
+        }
+    }
+}
+
+impl<W: AsyncWrite + Unpin> AsyncWrite for DrsWriter<W> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        if !this.enabled {
+            return Pin::new(&mut this.inner).poll_write(cx, buf);
+        }
+
+        if buf.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
+
+        loop {
+            let target = this.target_record_size();
+            let remaining = target.saturating_sub(this.bytes_in_current_record);
+
+            if remaining == 0 {
+                ready!(Pin::new(&mut this.inner).poll_flush(cx))?;
+                this.records_completed = this.records_completed.saturating_add(1);
+                this.bytes_in_current_record = 0;
+                continue;
+            }
+
+            let limit = buf.len().min(remaining);
+            let n = ready!(Pin::new(&mut this.inner).poll_write(cx, &buf[..limit]))?;
+            if n == 0 {
+                return Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "DrsWriter: inner write returned 0",
+                )));
+            }
+            this.bytes_in_current_record = this.bytes_in_current_record.saturating_add(n);
+            return Poll::Ready(Ok(n));
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
     }
 }
 

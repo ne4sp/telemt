@@ -79,6 +79,11 @@ pub async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+#[cfg(not(unix))]
+async fn run_inner() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    Err("telemt maestro runtime is supported on Unix targets only".into())
+}
+
 #[cfg(unix)]
 async fn run_inner(
     daemon_opts: DaemonOptions,

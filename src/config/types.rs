@@ -1504,6 +1504,13 @@ pub struct AntiCensorshipConfig {
     #[serde(default = "default_true")]
     pub tls_emulation: bool,
 
+    /// Chunk ciphertext fed into FakeTLS framing so each application TLS record
+    /// stays within browser-like sizes (MSS-friendly), reducing L4 segment
+    /// patterns that differ from real HTTPS. Applies only to authenticated
+    /// TLS MTProto sessions when enabled; classic/secure paths are unchanged.
+    #[serde(default = "default_true")]
+    pub tls_relay_dynamic_record_sizing: bool,
+
     /// Directory to store TLS front cache (on disk).
     #[serde(default = "default_tls_front_dir")]
     pub tls_front_dir: String,
@@ -1599,6 +1606,7 @@ impl Default for AntiCensorshipConfig {
             mask_unix_sock: None,
             fake_cert_len: default_fake_cert_len(),
             tls_emulation: true,
+            tls_relay_dynamic_record_sizing: true,
             tls_front_dir: default_tls_front_dir(),
             server_hello_delay_min_ms: default_server_hello_delay_min_ms(),
             server_hello_delay_max_ms: default_server_hello_delay_max_ms(),

@@ -51,6 +51,7 @@ ip = "0.0.0.0"
 tls_domain = "petrovich.ru"
 mask = true
 tls_emulation = true        # Fetch real cert lengths and emulate TLS records
+# tls_relay_dynamic_record_sizing = true   # MSS-friendly FakeTLS record chunks (TLS sessions only)
 tls_front_dir = "tlsfront"   # Cache directory for TLS emulation
 
 [access.users]

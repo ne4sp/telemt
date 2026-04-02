@@ -22,6 +22,7 @@ use crate::error::{HandshakeResult, ProxyError};
 use crate::protocol::constants::*;
 use crate::protocol::tls;
 use crate::stats::ReplayChecker;
+use crate::proxy::relay::DrsWriter;
 use crate::stream::{CryptoReader, CryptoWriter, FakeTlsReader, FakeTlsWriter};
 use crate::tls_front::{TlsFrontCache, emulator};
 use rand::RngExt;
@@ -846,7 +847,7 @@ pub async fn handle_mtproto_handshake<R, W>(
     replay_checker: &ReplayChecker,
     is_tls: bool,
     preferred_user: Option<&str>,
-) -> HandshakeResult<(CryptoReader<R>, CryptoWriter<W>, HandshakeSuccess), R, W>
+) -> HandshakeResult<(CryptoReader<R>, CryptoWriter<DrsWriter<W>>, HandshakeSuccess), R, W>
 where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send,
@@ -962,6 +963,10 @@ where
         auth_probe_record_success(peer.ip());
 
         let max_pending = config.general.crypto_pending_buffer;
+        let writer = DrsWriter::new(
+            writer,
+            is_tls && config.censorship.tls_relay_dynamic_record_sizing,
+        );
         return HandshakeResult::Success((
             CryptoReader::new(reader, decryptor),
             CryptoWriter::new(writer, encryptor, max_pending),

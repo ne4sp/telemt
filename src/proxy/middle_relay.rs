@@ -1,3 +1,8 @@
+//! Middle-end relay: client MTProto frames to ME pool and ME responses to the client.
+//!
+//! For TLS sessions, ciphertext chunking before FakeTLS framing is configured at
+//! handshake via `DrsWriter` in `proxy::relay` (`censorship.tls_relay_dynamic_record_sizing`).
+
 use std::collections::hash_map::RandomState;
 use std::collections::{BTreeSet, HashMap};
 #[cfg(test)]
