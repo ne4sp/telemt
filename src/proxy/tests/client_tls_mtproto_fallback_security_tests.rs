@@ -8,6 +8,7 @@ use crate::protocol::constants::{
 use crate::protocol::tls;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
+use crate::proxy::ProxySharedState;
 
 struct PipelineHarness {
     config: Arc<ProxyConfig>,
@@ -19,6 +20,7 @@ struct PipelineHarness {
     route_runtime: Arc<RouteRuntimeController>,
     ip_tracker: Arc<UserIpTracker>,
     beobachten: Arc<BeobachtenStore>,
+    proxy_shared: Arc<ProxySharedState>,
 }
 
 fn build_harness(secret_hex: &str, mask_port: u16) -> PipelineHarness {
@@ -66,6 +68,7 @@ fn build_harness(secret_hex: &str, mask_port: u16) -> PipelineHarness {
         route_runtime: Arc::new(RouteRuntimeController::new(RelayRouteMode::Direct)),
         ip_tracker: Arc::new(UserIpTracker::new()),
         beobachten: Arc::new(BeobachtenStore::new()),
+        proxy_shared: ProxySharedState::new(),
     }
 }
 
@@ -134,6 +137,8 @@ where
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_preserves_wire_and_backend_response() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -174,6 +179,7 @@ async fn tls_bad_mtproto_fallback_preserves_wire_and_backend_response() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -207,6 +213,8 @@ async fn tls_bad_mtproto_fallback_preserves_wire_and_backend_response() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_keeps_connects_bad_accounting() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -245,6 +253,7 @@ async fn tls_bad_mtproto_fallback_keeps_connects_bad_accounting() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -284,6 +293,8 @@ async fn tls_bad_mtproto_fallback_keeps_connects_bad_accounting() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_forwards_zero_length_tls_record_verbatim() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -319,6 +330,7 @@ async fn tls_bad_mtproto_fallback_forwards_zero_length_tls_record_verbatim() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -351,6 +363,8 @@ async fn tls_bad_mtproto_fallback_forwards_zero_length_tls_record_verbatim() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_forwards_max_tls_record_verbatim() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -387,6 +401,7 @@ async fn tls_bad_mtproto_fallback_forwards_max_tls_record_verbatim() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -419,6 +434,8 @@ async fn tls_bad_mtproto_fallback_forwards_max_tls_record_verbatim() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_light_fuzz_tls_record_lengths_verbatim() {
+    let proxy_shared = ProxySharedState::new();
+
     let lengths = [0usize, 1, 2, 3, 7, 15, 31, 63, 127, 255, 1024, 4096];
 
     for (idx, payload_len) in lengths.iter().copied().enumerate() {
@@ -465,6 +482,7 @@ async fn tls_bad_mtproto_fallback_light_fuzz_tls_record_lengths_verbatim() {
             None,
             harness.ip_tracker,
             harness.beobachten,
+            ProxySharedState::new(),
             false,
         ));
 
@@ -498,6 +516,8 @@ async fn tls_bad_mtproto_fallback_light_fuzz_tls_record_lengths_verbatim() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_concurrent_sessions_are_isolated() {
+    let proxy_shared = ProxySharedState::new();
+
     let sessions = 24usize;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
@@ -570,6 +590,7 @@ async fn tls_bad_mtproto_fallback_concurrent_sessions_are_isolated() {
                 None,
                 harness.ip_tracker,
                 harness.beobachten,
+                ProxySharedState::new(),
                 false,
             ));
 
@@ -608,6 +629,8 @@ async fn tls_bad_mtproto_fallback_concurrent_sessions_are_isolated() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_forwards_fragmented_client_writes_verbatim() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -644,6 +667,7 @@ async fn tls_bad_mtproto_fallback_forwards_fragmented_client_writes_verbatim() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -679,6 +703,8 @@ async fn tls_bad_mtproto_fallback_forwards_fragmented_client_writes_verbatim() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_header_fragmentation_bytewise_is_verbatim() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -713,6 +739,7 @@ async fn tls_bad_mtproto_fallback_header_fragmentation_bytewise_is_verbatim() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -747,6 +774,8 @@ async fn tls_bad_mtproto_fallback_header_fragmentation_bytewise_is_verbatim() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_record_splitting_chaos_is_verbatim() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -786,6 +815,7 @@ async fn tls_bad_mtproto_fallback_record_splitting_chaos_is_verbatim() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -831,6 +861,8 @@ async fn tls_bad_mtproto_fallback_record_splitting_chaos_is_verbatim() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_multiple_tls_records_are_forwarded_in_order() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -869,6 +901,7 @@ async fn tls_bad_mtproto_fallback_multiple_tls_records_are_forwarded_in_order() 
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -902,6 +935,8 @@ async fn tls_bad_mtproto_fallback_multiple_tls_records_are_forwarded_in_order() 
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_client_half_close_propagates_eof_to_backend() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -943,6 +978,7 @@ async fn tls_bad_mtproto_fallback_client_half_close_propagates_eof_to_backend() 
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -974,6 +1010,8 @@ async fn tls_bad_mtproto_fallback_client_half_close_propagates_eof_to_backend() 
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_backend_half_close_after_response_is_tolerated() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1013,6 +1051,7 @@ async fn tls_bad_mtproto_fallback_backend_half_close_after_response_is_tolerated
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1045,6 +1084,8 @@ async fn tls_bad_mtproto_fallback_backend_half_close_after_response_is_tolerated
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_backend_reset_after_clienthello_is_handled() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1075,6 +1116,7 @@ async fn tls_bad_mtproto_fallback_backend_reset_after_clienthello_is_handled() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1110,6 +1152,8 @@ async fn tls_bad_mtproto_fallback_backend_reset_after_clienthello_is_handled() {
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_backend_slow_reader_preserves_byte_identity() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1155,6 +1199,7 @@ async fn tls_bad_mtproto_fallback_backend_slow_reader_preserves_byte_identity() 
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1186,6 +1231,8 @@ async fn tls_bad_mtproto_fallback_backend_slow_reader_preserves_byte_identity() 
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_replay_pressure_masks_replay_without_serverhello() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1225,6 +1272,7 @@ async fn tls_bad_mtproto_fallback_replay_pressure_masks_replay_without_serverhel
         let route = harness.route_runtime.clone();
         let ipt = harness.ip_tracker.clone();
         let beob = harness.beobachten.clone();
+        let ps = harness.proxy_shared.clone();
         let invalid_mtproto_record = invalid_mtproto_record.clone();
         let trailing_record = trailing_record.clone();
         async move {
@@ -1242,6 +1290,7 @@ async fn tls_bad_mtproto_fallback_replay_pressure_masks_replay_without_serverhel
                 None,
                 ipt,
                 beob,
+                ps,
                 false,
             ));
 
@@ -1293,6 +1342,8 @@ async fn tls_bad_mtproto_fallback_replay_pressure_masks_replay_without_serverhel
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_large_multi_record_chaos_under_backpressure() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1337,6 +1388,7 @@ async fn tls_bad_mtproto_fallback_large_multi_record_chaos_under_backpressure() 
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1380,6 +1432,8 @@ async fn tls_bad_mtproto_fallback_large_multi_record_chaos_under_backpressure() 
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_interleaved_control_and_application_records_verbatim() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1418,6 +1472,7 @@ async fn tls_bad_mtproto_fallback_interleaved_control_and_application_records_ve
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1451,6 +1506,8 @@ async fn tls_bad_mtproto_fallback_interleaved_control_and_application_records_ve
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_many_short_sessions_with_chaos_no_cross_leak() {
+    let proxy_shared = ProxySharedState::new();
+
     let sessions = 40usize;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
@@ -1521,6 +1578,7 @@ async fn tls_bad_mtproto_fallback_many_short_sessions_with_chaos_no_cross_leak()
                 None,
                 harness.ip_tracker,
                 harness.beobachten,
+                ProxySharedState::new(),
                 false,
             ));
 
@@ -1557,6 +1615,8 @@ async fn tls_bad_mtproto_fallback_many_short_sessions_with_chaos_no_cross_leak()
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_coalesced_tail_small_is_forwarded_as_tls_record() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1591,6 +1651,7 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_small_is_forwarded_as_tls_recor
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1616,6 +1677,8 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_small_is_forwarded_as_tls_recor
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_coalesced_tail_large_is_forwarded_as_tls_record() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1650,6 +1713,7 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_large_is_forwarded_as_tls_recor
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1675,6 +1739,8 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_large_is_forwarded_as_tls_recor
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_coalesced_tail_keeps_order_before_following_record() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1711,6 +1777,7 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_keeps_order_before_following_re
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1737,6 +1804,8 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_keeps_order_before_following_re
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_coalesced_tail_fragmented_client_write_is_forwarded() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1771,6 +1840,7 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_fragmented_client_write_is_forw
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1808,6 +1878,8 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_fragmented_client_write_is_forw
 
 #[tokio::test]
 async fn tls_bad_mtproto_fallback_coalesced_tail_max_payload_is_forwarded() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1842,6 +1914,7 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_max_payload_is_forwarded() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1867,6 +1940,8 @@ async fn tls_bad_mtproto_fallback_coalesced_tail_max_payload_is_forwarded() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_identical_following_record_must_not_duplicate_or_reorder() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1906,6 +1981,7 @@ async fn blackhat_coalesced_tail_identical_following_record_must_not_duplicate_o
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1932,6 +2008,8 @@ async fn blackhat_coalesced_tail_identical_following_record_must_not_duplicate_o
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_tls_header_looking_bytes_must_stay_payload() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1967,6 +2045,7 @@ async fn blackhat_coalesced_tail_tls_header_looking_bytes_must_stay_payload() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -1992,6 +2071,8 @@ async fn blackhat_coalesced_tail_tls_header_looking_bytes_must_stay_payload() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_client_half_close_must_not_truncate_prepended_record() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2030,6 +2111,7 @@ async fn blackhat_coalesced_tail_client_half_close_must_not_truncate_prepended_r
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2055,6 +2137,8 @@ async fn blackhat_coalesced_tail_client_half_close_must_not_truncate_prepended_r
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_multi_session_no_cross_bleed_under_churn() {
+    let proxy_shared = ProxySharedState::new();
+
     let sessions = 16usize;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
@@ -2114,6 +2198,7 @@ async fn blackhat_coalesced_tail_multi_session_no_cross_bleed_under_churn() {
                 None,
                 harness.ip_tracker,
                 harness.beobachten,
+                ProxySharedState::new(),
                 false,
             ));
 
@@ -2147,6 +2232,8 @@ async fn blackhat_coalesced_tail_multi_session_no_cross_bleed_under_churn() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_single_byte_tail_is_preserved() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2180,6 +2267,7 @@ async fn blackhat_coalesced_tail_single_byte_tail_is_preserved() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2204,6 +2292,8 @@ async fn blackhat_coalesced_tail_single_byte_tail_is_preserved() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_exact_tls_header_size_payload_is_preserved() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2237,6 +2327,7 @@ async fn blackhat_coalesced_tail_exact_tls_header_size_payload_is_preserved() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2261,6 +2352,8 @@ async fn blackhat_coalesced_tail_exact_tls_header_size_payload_is_preserved() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_all_zero_payload_is_preserved() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2294,6 +2387,7 @@ async fn blackhat_coalesced_tail_all_zero_payload_is_preserved() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2318,6 +2412,8 @@ async fn blackhat_coalesced_tail_all_zero_payload_is_preserved() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_following_control_records_are_not_mutated() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2356,6 +2452,7 @@ async fn blackhat_coalesced_tail_following_control_records_are_not_mutated() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2384,6 +2481,8 @@ async fn blackhat_coalesced_tail_following_control_records_are_not_mutated() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_then_following_records_fragmented_chaos_stays_ordered() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2421,6 +2520,7 @@ async fn blackhat_coalesced_tail_then_following_records_fragmented_chaos_stays_o
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2457,6 +2557,8 @@ async fn blackhat_coalesced_tail_then_following_records_fragmented_chaos_stays_o
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_backend_response_integrity_after_fallback() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2494,6 +2596,7 @@ async fn blackhat_coalesced_tail_backend_response_integrity_after_fallback() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2543,6 +2646,8 @@ async fn blackhat_coalesced_tail_backend_response_integrity_after_fallback() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_connects_bad_increments_exactly_once() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2578,6 +2683,7 @@ async fn blackhat_coalesced_tail_connects_bad_increments_exactly_once() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2609,6 +2715,8 @@ async fn blackhat_coalesced_tail_connects_bad_increments_exactly_once() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_parallel_32_sessions_no_cross_bleed() {
+    let proxy_shared = ProxySharedState::new();
+
     let sessions = 32usize;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
@@ -2671,6 +2779,7 @@ async fn blackhat_coalesced_tail_parallel_32_sessions_no_cross_bleed() {
                 None,
                 harness.ip_tracker,
                 harness.beobachten,
+                ProxySharedState::new(),
                 false,
             ));
 
@@ -2705,6 +2814,8 @@ async fn blackhat_coalesced_tail_parallel_32_sessions_no_cross_bleed() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_repeated_tls_like_prefixes_are_preserved() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2741,6 +2852,7 @@ async fn blackhat_coalesced_tail_repeated_tls_like_prefixes_are_preserved() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2765,6 +2877,8 @@ async fn blackhat_coalesced_tail_repeated_tls_like_prefixes_are_preserved() {
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_drop_after_write_still_delivers_prepended_record() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2797,6 +2911,7 @@ async fn blackhat_coalesced_tail_drop_after_write_still_delivers_prepended_recor
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2821,6 +2936,8 @@ async fn blackhat_coalesced_tail_drop_after_write_still_delivers_prepended_recor
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_zero_following_record_after_coalesced_is_not_invented() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2857,6 +2974,7 @@ async fn blackhat_coalesced_tail_zero_following_record_after_coalesced_is_not_in
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -2881,6 +2999,8 @@ async fn blackhat_coalesced_tail_zero_following_record_after_coalesced_is_not_in
 
 #[tokio::test]
 async fn blackhat_coalesced_tail_light_fuzz_mixed_followup_records_stay_byte_exact() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut seed = 0xA11C_E2E5_F00D_BAADu64;
 
     for case in 0..24u32 {
@@ -2946,6 +3066,7 @@ async fn blackhat_coalesced_tail_light_fuzz_mixed_followup_records_stay_byte_exa
             None,
             harness.ip_tracker,
             harness.beobachten,
+            ProxySharedState::new(),
             false,
         ));
 

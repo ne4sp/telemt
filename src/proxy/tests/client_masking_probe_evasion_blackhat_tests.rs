@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::{TcpListener, TcpStream};
+use crate::proxy::ProxySharedState;
 
 const REPLY_404: &[u8] = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
 
@@ -45,6 +46,7 @@ fn masking_config(mask_port: u16) -> Arc<ProxyConfig> {
 }
 
 async fn run_generic_probe_and_capture_prefix(payload: Vec<u8>, expected_prefix: Vec<u8>) {
+    let proxy_shared = ProxySharedState::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -86,6 +88,7 @@ async fn run_generic_probe_and_capture_prefix(payload: Vec<u8>, expected_prefix:
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -148,6 +151,8 @@ async fn blackhat_invalid_tls_like_probe_masks_and_preserves_header_prefix() {
 
 #[tokio::test]
 async fn integration_client_handler_plain_probe_masks_and_preserves_prefix() {
+    let proxy_shared = ProxySharedState::new();
+
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = mask_listener.local_addr().unwrap();
 
@@ -203,6 +208,7 @@ async fn integration_client_handler_plain_probe_masks_and_preserves_prefix() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared.clone(),
                 false,
                 real_peer_report,
             )
@@ -237,6 +243,8 @@ async fn integration_client_handler_plain_probe_masks_and_preserves_prefix() {
 
 #[tokio::test]
 async fn light_fuzz_small_probe_variants_always_mask_and_preserve_declared_prefix() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut rng = StdRng::seed_from_u64(0xA11E_5EED_F0F0_CAFE);
 
     for i in 0..24usize {
@@ -262,6 +270,7 @@ async fn light_fuzz_small_probe_variants_always_mask_and_preserve_declared_prefi
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stress_parallel_probe_mix_masks_all_sessions_without_cross_leakage() {
+    let proxy_shared = ProxySharedState::new();
     let session_count = 12usize;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
@@ -308,6 +317,7 @@ async fn stress_parallel_probe_mix_masks_all_sessions_without_cross_leakage() {
             .parse()
             .unwrap();
 
+        let proxy_shared = proxy_shared.clone();
         tasks.push(tokio::spawn(async move {
             let (server_side, mut client_side) = duplex(4096);
             let handler = tokio::spawn(handle_client_stream(
@@ -324,6 +334,7 @@ async fn stress_parallel_probe_mix_masks_all_sessions_without_cross_leakage() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared,
                 false,
             ));
 

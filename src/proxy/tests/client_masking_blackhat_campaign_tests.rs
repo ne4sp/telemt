@@ -12,6 +12,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, Instant};
+use crate::proxy::ProxySharedState;
 
 struct CampaignHarness {
     config: Arc<ProxyConfig>,
@@ -23,6 +24,7 @@ struct CampaignHarness {
     route_runtime: Arc<RouteRuntimeController>,
     ip_tracker: Arc<UserIpTracker>,
     beobachten: Arc<BeobachtenStore>,
+    proxy_shared: Arc<ProxySharedState>,
 }
 
 fn new_upstream_manager(stats: Arc<Stats>) -> Arc<UpstreamManager> {
@@ -73,6 +75,7 @@ fn build_mask_harness(secret_hex: &str, mask_port: u16) -> CampaignHarness {
         route_runtime: Arc::new(RouteRuntimeController::new(RelayRouteMode::Direct)),
         ip_tracker: Arc::new(UserIpTracker::new()),
         beobachten: Arc::new(BeobachtenStore::new()),
+        proxy_shared: ProxySharedState::new(),
     }
 }
 
@@ -166,6 +169,7 @@ async fn run_tls_success_mtproto_fail_capture(
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -233,6 +237,7 @@ async fn run_invalid_tls_capture(config: Arc<ProxyConfig>, payload: Vec<u8>, exp
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -366,6 +371,8 @@ async fn blackhat_campaign_05_coalesced_tail_plus_next_record_keep_wire_order() 
 
 #[tokio::test]
 async fn blackhat_campaign_06_replayed_tls_hello_is_masked_without_serverhello() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -405,6 +412,7 @@ async fn blackhat_campaign_06_replayed_tls_hello_is_masked_without_serverhello()
         let route = harness.route_runtime.clone();
         let ipt = harness.ip_tracker.clone();
         let beob = harness.beobachten.clone();
+        let ps = harness.proxy_shared.clone();
 
         async move {
             let (server_side, mut client_side) = duplex(131072);
@@ -422,6 +430,7 @@ async fn blackhat_campaign_06_replayed_tls_hello_is_masked_without_serverhello()
                 None,
                 ipt,
                 beob,
+                ps,
                 false,
             ));
 
@@ -484,6 +493,8 @@ async fn blackhat_campaign_08_out_of_bounds_len_forwards_header_only() {
 
 #[tokio::test]
 async fn blackhat_campaign_09_fragmented_header_then_partial_body_masks_seen_bytes_only() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -525,6 +536,7 @@ async fn blackhat_campaign_09_fragmented_header_then_partial_body_masks_seen_byt
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -548,6 +560,8 @@ async fn blackhat_campaign_09_fragmented_header_then_partial_body_masks_seen_byt
 
 #[tokio::test]
 async fn blackhat_campaign_10_zero_handshake_timeout_with_delay_still_avoids_timeout_counter() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.censorship.mask = true;
@@ -576,6 +590,7 @@ async fn blackhat_campaign_10_zero_handshake_timeout_with_delay_still_avoids_tim
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -600,6 +615,8 @@ async fn blackhat_campaign_10_zero_handshake_timeout_with_delay_still_avoids_tim
 
 #[tokio::test]
 async fn blackhat_campaign_11_parallel_bad_tls_probes_all_masked_without_timeouts() {
+    let proxy_shared = ProxySharedState::new();
+
     let n = 24usize;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
@@ -649,6 +666,7 @@ async fn blackhat_campaign_11_parallel_bad_tls_probes_all_masked_without_timeout
                 None,
                 Arc::new(UserIpTracker::new()),
                 Arc::new(BeobachtenStore::new()),
+                ProxySharedState::new(),
                 false,
             ));
             client_side.write_all(&hdr).await.unwrap();
@@ -677,6 +695,8 @@ async fn blackhat_campaign_11_parallel_bad_tls_probes_all_masked_without_timeout
 
 #[tokio::test]
 async fn blackhat_campaign_12_parallel_tls_success_mtproto_fail_sessions_keep_isolation() {
+    let proxy_shared = ProxySharedState::new();
+
     let sessions = 16usize;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
@@ -730,6 +750,7 @@ async fn blackhat_campaign_12_parallel_tls_success_mtproto_fail_sessions_keep_is
                 None,
                 harness.ip_tracker,
                 harness.beobachten,
+                ProxySharedState::new(),
                 false,
             ));
 
@@ -766,6 +787,8 @@ async fn blackhat_campaign_12_parallel_tls_success_mtproto_fail_sessions_keep_is
 
 #[tokio::test]
 async fn blackhat_campaign_13_backend_down_does_not_escalate_to_handshake_timeout() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.censorship.mask = true;
     cfg.censorship.mask_unix_sock = None;
@@ -789,6 +812,7 @@ async fn blackhat_campaign_13_backend_down_does_not_escalate_to_handshake_timeou
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -806,6 +830,8 @@ async fn blackhat_campaign_13_backend_down_does_not_escalate_to_handshake_timeou
 
 #[tokio::test]
 async fn blackhat_campaign_14_masking_disabled_path_finishes_cleanly() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.censorship.mask = false;
     cfg.timeouts.client_handshake = 1;
@@ -826,6 +852,7 @@ async fn blackhat_campaign_14_masking_disabled_path_finishes_cleanly() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, Instant};
+use crate::proxy::ProxySharedState;
 
 fn new_upstream_manager(stats: Arc<Stats>) -> Arc<UpstreamManager> {
     Arc::new(UpstreamManager::new(
@@ -64,6 +65,7 @@ async fn measure_reject_duration_ms(body_sent: usize) -> u128 {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -121,6 +123,7 @@ async fn capture_forwarded_len(body_sent: usize) -> usize {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 

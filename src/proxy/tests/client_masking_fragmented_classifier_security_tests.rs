@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
 use tokio::time::Duration;
+use crate::proxy::ProxySharedState;
 
 fn new_upstream_manager(stats: Arc<Stats>) -> Arc<UpstreamManager> {
     Arc::new(UpstreamManager::new(
@@ -29,6 +30,8 @@ fn new_upstream_manager(stats: Arc<Stats>) -> Arc<UpstreamManager> {
 
 #[tokio::test]
 async fn fragmented_connect_probe_is_classified_as_http_via_prefetch_window() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -70,6 +73,7 @@ async fn fragmented_connect_probe_is_classified_as_http_via_prefetch_window() {
         None,
         Arc::new(UserIpTracker::new()),
         beobachten.clone(),
+        proxy_shared.clone(),
         false,
     ));
 

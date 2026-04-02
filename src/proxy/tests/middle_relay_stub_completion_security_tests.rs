@@ -1,4 +1,5 @@
 use super::*;
+use crate::proxy::ProxySharedState;
 use crate::stream::BufferPool;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -15,32 +16,28 @@ fn make_pooled_payload(data: &[u8]) -> PooledBuffer {
 #[test]
 #[ignore = "Tracking for M-04: Verify should_emit_full_desync returns true on first occurrence and false on duplicate within window"]
 fn should_emit_full_desync_filters_duplicates() {
-    let _guard = desync_dedup_test_lock()
-        .lock()
-        .expect("desync dedup test lock must be available");
-    clear_desync_dedup_for_testing();
-
+    let shared = ProxySharedState::new();
     let key = 0x4D04_0000_0000_0001_u64;
     let base = Instant::now();
 
     assert!(
-        should_emit_full_desync(key, false, base),
+        super::should_emit_full_desync(shared.as_ref(), key, false, base),
         "first occurrence must emit full forensic record"
     );
     assert!(
-        !should_emit_full_desync(key, false, base),
+        !super::should_emit_full_desync(shared.as_ref(), key, false, base),
         "duplicate at same timestamp must be suppressed"
     );
 
     let within_window = base + DESYNC_DEDUP_WINDOW - TokioDuration::from_millis(1);
     assert!(
-        !should_emit_full_desync(key, false, within_window),
+        !super::should_emit_full_desync(shared.as_ref(), key, false, within_window),
         "duplicate strictly inside dedup window must stay suppressed"
     );
 
     let on_window_edge = base + DESYNC_DEDUP_WINDOW;
     assert!(
-        should_emit_full_desync(key, false, on_window_edge),
+        super::should_emit_full_desync(shared.as_ref(), key, false, on_window_edge),
         "duplicate at window boundary must re-emit and refresh"
     );
 }
@@ -48,22 +45,16 @@ fn should_emit_full_desync_filters_duplicates() {
 #[test]
 #[ignore = "Tracking for M-04: Verify desync dedup eviction behaves correctly under map-full condition"]
 fn desync_dedup_eviction_under_map_full_condition() {
-    let _guard = desync_dedup_test_lock()
-        .lock()
-        .expect("desync dedup test lock must be available");
-    clear_desync_dedup_for_testing();
-
+    let shared = ProxySharedState::new();
     let base = Instant::now();
     for key in 0..DESYNC_DEDUP_MAX_ENTRIES as u64 {
         assert!(
-            should_emit_full_desync(key, false, base),
+            super::should_emit_full_desync(shared.as_ref(), key, false, base),
             "unique key should be inserted while warming dedup cache"
         );
     }
 
-    let dedup = DESYNC_DEDUP
-        .get()
-        .expect("dedup map must exist after warm-up insertions");
+    let dedup = &shared.desync_dedup;
     assert_eq!(
         dedup.len(),
         DESYNC_DEDUP_MAX_ENTRIES,
@@ -74,7 +65,7 @@ fn desync_dedup_eviction_under_map_full_condition() {
     let newcomer_key = 0x4D04_FFFF_FFFF_0001_u64;
 
     assert!(
-        should_emit_full_desync(newcomer_key, false, base),
+        super::should_emit_full_desync(shared.as_ref(), newcomer_key, false, base),
         "first newcomer at map-full must emit under bounded full-cache gate"
     );
 
@@ -101,7 +92,7 @@ fn desync_dedup_eviction_under_map_full_condition() {
     );
 
     assert!(
-        !should_emit_full_desync(newcomer_key, false, base),
+        !super::should_emit_full_desync(shared.as_ref(), newcomer_key, false, base),
         "immediate duplicate newcomer must remain suppressed"
     );
 }
@@ -109,6 +100,7 @@ fn desync_dedup_eviction_under_map_full_condition() {
 #[tokio::test]
 #[ignore = "Tracking for M-05: Verify C2ME channel full path yields then sends under backpressure"]
 async fn c2me_channel_full_path_yields_then_sends() {
+    let shared = ProxySharedState::new();
     let (tx, mut rx) = mpsc::channel::<C2MeCommand>(1);
 
     tx.send(C2MeCommand::Data {
@@ -119,8 +111,10 @@ async fn c2me_channel_full_path_yields_then_sends() {
     .expect("priming queue with one frame must succeed");
 
     let tx2 = tx.clone();
+    let shared_prod = Arc::clone(&shared);
     let producer = tokio::spawn(async move {
-        enqueue_c2me_command(
+        super::enqueue_c2me_command(
+            shared_prod.as_ref(),
             &tx2,
             C2MeCommand::Data {
                 payload: make_pooled_payload(&[0xBB, 0xCC]),

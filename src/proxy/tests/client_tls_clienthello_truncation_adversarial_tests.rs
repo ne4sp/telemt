@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::sleep;
+use crate::proxy::ProxySharedState;
 
 fn in_range_probe_header() -> [u8; 5] {
     [
@@ -78,6 +79,7 @@ async fn run_blackhat_generic_fragmented_probe_should_mask(
     delay_ms: u64,
     backend_reply: Vec<u8>,
 ) {
+    let proxy_shared = ProxySharedState::new();
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mask_addr = mask_listener.local_addr().unwrap();
     let probe_header = in_range_probe_header();
@@ -129,6 +131,7 @@ async fn run_blackhat_generic_fragmented_probe_should_mask(
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -162,6 +165,7 @@ async fn run_blackhat_client_handler_fragmented_probe_should_mask(
     delay_ms: u64,
     backend_reply: Vec<u8>,
 ) {
+    let proxy_shared = ProxySharedState::new();
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mask_addr = mask_listener.local_addr().unwrap();
 
@@ -209,6 +213,7 @@ async fn run_blackhat_client_handler_fragmented_probe_should_mask(
         let route_runtime = route_runtime.clone();
         let ip_tracker = ip_tracker.clone();
         let beobachten = beobachten.clone();
+        let proxy_shared = proxy_shared.clone();
 
         tokio::spawn(async move {
             let (stream, peer) = front_listener.accept().await.unwrap();
@@ -227,6 +232,7 @@ async fn run_blackhat_client_handler_fragmented_probe_should_mask(
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared,
                 false,
                 real_peer_report,
             )
@@ -259,6 +265,8 @@ async fn run_blackhat_client_handler_fragmented_probe_should_mask(
 
 #[tokio::test]
 async fn blackhat_truncated_in_range_clienthello_generic_stream_should_mask() {
+    let proxy_shared = ProxySharedState::new();
+
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mask_addr = mask_listener.local_addr().unwrap();
     let backend_reply = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
@@ -311,6 +319,7 @@ async fn blackhat_truncated_in_range_clienthello_generic_stream_should_mask() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -342,6 +351,8 @@ async fn blackhat_truncated_in_range_clienthello_generic_stream_should_mask() {
 
 #[tokio::test]
 async fn blackhat_truncated_in_range_clienthello_client_handler_should_mask() {
+    let proxy_shared = ProxySharedState::new();
+
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mask_addr = mask_listener.local_addr().unwrap();
 
@@ -391,6 +402,7 @@ async fn blackhat_truncated_in_range_clienthello_client_handler_should_mask() {
         let route_runtime = route_runtime.clone();
         let ip_tracker = ip_tracker.clone();
         let beobachten = beobachten.clone();
+        let proxy_shared = proxy_shared.clone();
 
         tokio::spawn(async move {
             let (stream, peer) = front_listener.accept().await.unwrap();
@@ -409,6 +421,7 @@ async fn blackhat_truncated_in_range_clienthello_client_handler_should_mask() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared,
                 false,
                 real_peer_report,
             )

@@ -3,12 +3,7 @@ use crate::crypto::{AesCtr, SecureRandom, sha256, sha256_hmac};
 use crate::protocol::constants::{ProtoTag, TLS_RECORD_HANDSHAKE, TLS_VERSION};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-
-fn auth_probe_test_guard() -> std::sync::MutexGuard<'static, ()> {
-    auth_probe_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
+use crate::proxy::ProxySharedState;
 
 fn make_valid_mtproto_handshake(
     secret_hex: &str,
@@ -149,8 +144,7 @@ fn median_ns(samples: &mut [u128]) -> u128 {
 #[tokio::test]
 #[ignore = "manual benchmark: timing-sensitive and host-dependent"]
 async fn mtproto_user_scan_timing_manual_benchmark() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
+    let proxy_shared = ProxySharedState::new();
 
     const DECOY_USERS: usize = 8_000;
     const ITERATIONS: usize = 250;
@@ -198,6 +192,7 @@ async fn mtproto_user_scan_timing_manual_benchmark() {
             peer_a,
             &config,
             &replay_checker_preferred,
+            proxy_shared.as_ref(),
             false,
             Some(preferred_user),
         )
@@ -213,6 +208,7 @@ async fn mtproto_user_scan_timing_manual_benchmark() {
             peer_b,
             &config,
             &replay_checker_full_scan,
+            proxy_shared.as_ref(),
             false,
             None,
         )
@@ -243,8 +239,6 @@ async fn mtproto_user_scan_timing_manual_benchmark() {
 #[tokio::test]
 #[ignore = "manual benchmark: timing-sensitive and host-dependent"]
 async fn tls_sni_preferred_vs_no_sni_fallback_manual_benchmark() {
-    let _guard = auth_probe_test_guard();
-
     const DECOY_USERS: usize = 8_000;
     const ITERATIONS: usize = 250;
 

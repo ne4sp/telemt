@@ -6,6 +6,7 @@ use crate::protocol::tls;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, Instant};
+use crate::proxy::ProxySharedState;
 
 struct RedTeamHarness {
     config: Arc<ProxyConfig>,
@@ -141,6 +142,7 @@ async fn run_tls_success_mtproto_fail_session(
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -210,6 +212,8 @@ async fn redteam_02_backend_must_never_receive_tls_records_after_mtproto_fail() 
 #[tokio::test]
 #[ignore = "red-team expected-fail: impossible timing uniformity target"]
 async fn redteam_03_masking_duration_must_be_less_than_1ms_when_backend_down() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.censorship.mask = true;
@@ -269,6 +273,7 @@ async fn redteam_03_masking_duration_must_be_less_than_1ms_when_backend_down() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -392,6 +397,8 @@ redteam_tail_must_not_forward_case!(
 #[tokio::test]
 #[ignore = "red-team expected-fail: impossible indistinguishability envelope"]
 async fn redteam_16_timing_delta_between_paths_must_be_sub_1ms_under_concurrency() {
+    let proxy_shared = ProxySharedState::new();
+
     let runs = 20usize;
     let mut durations = Vec::with_capacity(runs);
 
@@ -421,6 +428,7 @@ async fn redteam_16_timing_delta_between_paths_must_be_sub_1ms_under_concurrency
             None,
             harness.ip_tracker,
             harness.beobachten,
+            ProxySharedState::new(),
             false,
         ));
 
@@ -492,6 +500,7 @@ async fn measure_invalid_probe_duration_ms(delay_ms: u64, tls_len: u16, body_sen
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -566,6 +575,7 @@ async fn capture_forwarded_probe_len(tls_len: u16, body_sent: usize) -> usize {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 

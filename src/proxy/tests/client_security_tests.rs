@@ -15,6 +15,7 @@ use rand::rngs::StdRng;
 use std::net::Ipv4Addr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::{TcpListener, TcpStream};
+use crate::proxy::ProxySharedState;
 
 #[test]
 fn synthetic_local_addr_uses_configured_port_for_zero() {
@@ -320,6 +321,7 @@ async fn relay_task_abort_releases_user_gate_and_ip_reservation() {
 
     let stats = Arc::new(Stats::new());
     let ip_tracker = Arc::new(UserIpTracker::new());
+    let proxy_shared = ProxySharedState::new();
 
     let mut cfg = ProxyConfig::default();
     cfg.access.user_max_tcp_conns.insert(user.to_string(), 8);
@@ -382,6 +384,7 @@ async fn relay_task_abort_releases_user_gate_and_ip_reservation() {
         "127.0.0.1:443".parse().unwrap(),
         peer_addr,
         ip_tracker.clone(),
+        proxy_shared.clone(),
     ));
 
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -434,6 +437,7 @@ async fn relay_cutover_releases_user_gate_and_ip_reservation() {
 
     let stats = Arc::new(Stats::new());
     let ip_tracker = Arc::new(UserIpTracker::new());
+    let proxy_shared = ProxySharedState::new();
 
     let mut cfg = ProxyConfig::default();
     cfg.access.user_max_tcp_conns.insert(user.to_string(), 8);
@@ -496,6 +500,7 @@ async fn relay_cutover_releases_user_gate_and_ip_reservation() {
         "127.0.0.1:443".parse().unwrap(),
         peer_addr,
         ip_tracker.clone(),
+        proxy_shared.clone(),
     ));
 
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -557,6 +562,7 @@ async fn integration_route_cutover_and_quota_overlap_fails_closed_and_releases_s
 
     let stats = Arc::new(Stats::new());
     let ip_tracker = Arc::new(UserIpTracker::new());
+    let proxy_shared = ProxySharedState::new();
 
     let mut cfg = ProxyConfig::default();
     cfg.access.user_max_tcp_conns.insert(user.to_string(), 8);
@@ -620,6 +626,7 @@ async fn integration_route_cutover_and_quota_overlap_fails_closed_and_releases_s
         "127.0.0.1:443".parse().unwrap(),
         peer_addr,
         ip_tracker.clone(),
+        proxy_shared.clone(),
     ));
 
     let observed_progress = tokio::time::timeout(Duration::from_secs(2), async {
@@ -729,6 +736,8 @@ async fn stress_drop_without_release_converges_to_zero_user_and_ip_state() {
 
 #[tokio::test]
 async fn proxy_protocol_header_is_rejected_when_trust_list_is_empty() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = crate::config::ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.server.proxy_protocol_trusted_cidrs.clear();
@@ -783,6 +792,7 @@ async fn proxy_protocol_header_is_rejected_when_trust_list_is_empty() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         true,
     ));
 
@@ -804,6 +814,8 @@ async fn proxy_protocol_header_is_rejected_when_trust_list_is_empty() {
 
 #[tokio::test]
 async fn proxy_protocol_header_from_untrusted_peer_range_is_rejected_under_load() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = crate::config::ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.server.proxy_protocol_trusted_cidrs = vec!["10.0.0.0/8".parse().unwrap()];
@@ -864,6 +876,7 @@ async fn proxy_protocol_header_from_untrusted_peer_range_is_rejected_under_load(
             None,
             ip_tracker,
             beobachten,
+            proxy_shared.clone(),
             true,
         ));
 
@@ -945,6 +958,8 @@ async fn reservation_limit_failure_does_not_leak_curr_connects_counter() {
 
 #[tokio::test]
 async fn short_tls_probe_is_masked_through_client_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
     let probe = vec![0x16, 0x03, 0x01, 0x00, 0x10];
@@ -1015,6 +1030,7 @@ async fn short_tls_probe_is_masked_through_client_pipeline() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -1033,6 +1049,8 @@ async fn short_tls_probe_is_masked_through_client_pipeline() {
 
 #[tokio::test]
 async fn tls12_record_probe_is_masked_through_client_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
     let probe = vec![0x16, 0x03, 0x03, 0x00, 0x10];
@@ -1103,6 +1121,7 @@ async fn tls12_record_probe_is_masked_through_client_pipeline() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -1121,6 +1140,8 @@ async fn tls12_record_probe_is_masked_through_client_pipeline() {
 
 #[tokio::test]
 async fn handle_client_stream_increments_connects_all_exactly_once() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
     let probe = vec![0x16, 0x03, 0x01, 0x00, 0x10];
@@ -1189,6 +1210,7 @@ async fn handle_client_stream_increments_connects_all_exactly_once() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -1213,6 +1235,8 @@ async fn handle_client_stream_increments_connects_all_exactly_once() {
 
 #[tokio::test]
 async fn running_client_handler_increments_connects_all_exactly_once() {
+    let proxy_shared = ProxySharedState::new();
+
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = mask_listener.local_addr().unwrap();
 
@@ -1293,6 +1317,7 @@ async fn running_client_handler_increments_connects_all_exactly_once() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared.clone(),
                 false,
                 real_peer_report,
             )
@@ -1323,6 +1348,7 @@ async fn running_client_handler_increments_connects_all_exactly_once() {
 
 #[tokio::test(start_paused = true)]
 async fn idle_pooled_connection_closes_cleanly_in_generic_stream_path() {
+    let proxy_shared = ProxySharedState::new();
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.timeouts.client_first_byte_idle_secs = 1;
@@ -1372,6 +1398,7 @@ async fn idle_pooled_connection_closes_cleanly_in_generic_stream_path() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -1391,6 +1418,7 @@ async fn idle_pooled_connection_closes_cleanly_in_generic_stream_path() {
 
 #[tokio::test(start_paused = true)]
 async fn idle_pooled_connection_closes_cleanly_in_client_handler_path() {
+    let proxy_shared = ProxySharedState::new();
     let front_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let front_addr = front_listener.local_addr().unwrap();
 
@@ -1436,6 +1464,7 @@ async fn idle_pooled_connection_closes_cleanly_in_client_handler_path() {
         let route_runtime = route_runtime.clone();
         let ip_tracker = ip_tracker.clone();
         let beobachten = beobachten.clone();
+        let proxy_shared = proxy_shared.clone();
 
         tokio::spawn(async move {
             let (stream, peer) = front_listener.accept().await.unwrap();
@@ -1454,6 +1483,7 @@ async fn idle_pooled_connection_closes_cleanly_in_client_handler_path() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared,
                 false,
                 real_peer_report,
             )
@@ -1480,6 +1510,8 @@ async fn idle_pooled_connection_closes_cleanly_in_client_handler_path() {
 
 #[tokio::test]
 async fn partial_tls_header_stall_triggers_handshake_timeout() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.timeouts.client_handshake = 1;
@@ -1529,6 +1561,7 @@ async fn partial_tls_header_stall_triggers_handshake_timeout() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -1713,6 +1746,7 @@ async fn fragmented_tls_mtproto_with_interleaved_ccs_is_accepted() {
     let config = Arc::new(cfg);
     let replay_checker = Arc::new(ReplayChecker::new(128, Duration::from_secs(60)));
     let rng = SecureRandom::new();
+    let proxy_shared = ProxySharedState::new();
 
     let (server_side, mut client_side) = duplex(131072);
     let peer: SocketAddr = "198.51.100.85:55007".parse().unwrap();
@@ -1725,6 +1759,7 @@ async fn fragmented_tls_mtproto_with_interleaved_ccs_is_accepted() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -1774,6 +1809,7 @@ async fn fragmented_tls_mtproto_with_interleaved_ccs_is_accepted() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         true,
         Some(tls_user.as_str()),
     )
@@ -1790,6 +1826,8 @@ async fn fragmented_tls_mtproto_with_interleaved_ccs_is_accepted() {
 
 #[tokio::test]
 async fn valid_tls_path_does_not_fall_back_to_mask_backend() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1856,6 +1894,7 @@ async fn valid_tls_path_does_not_fall_back_to_mask_backend() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -1887,6 +1926,8 @@ async fn valid_tls_path_does_not_fall_back_to_mask_backend() {
 
 #[tokio::test]
 async fn valid_tls_with_invalid_mtproto_falls_back_to_mask_backend() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -1963,6 +2004,7 @@ async fn valid_tls_with_invalid_mtproto_falls_back_to_mask_backend() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -1991,6 +2033,8 @@ async fn valid_tls_with_invalid_mtproto_falls_back_to_mask_backend() {
 
 #[tokio::test]
 async fn client_handler_tls_bad_mtproto_is_forwarded_to_mask_backend() {
+    let proxy_shared = ProxySharedState::new();
+
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = mask_listener.local_addr().unwrap();
 
@@ -2081,6 +2125,7 @@ async fn client_handler_tls_bad_mtproto_is_forwarded_to_mask_backend() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared.clone(),
                 false,
                 real_peer_report,
             )
@@ -2114,6 +2159,8 @@ async fn client_handler_tls_bad_mtproto_is_forwarded_to_mask_backend() {
 
 #[tokio::test]
 async fn alpn_mismatch_tls_probe_is_masked_through_client_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2192,6 +2239,7 @@ async fn alpn_mismatch_tls_probe_is_masked_through_client_pipeline() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -2210,6 +2258,8 @@ async fn alpn_mismatch_tls_probe_is_masked_through_client_pipeline() {
 
 #[tokio::test]
 async fn invalid_hmac_tls_probe_is_masked_through_client_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -2285,6 +2335,7 @@ async fn invalid_hmac_tls_probe_is_masked_through_client_pipeline() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -2303,6 +2354,8 @@ async fn invalid_hmac_tls_probe_is_masked_through_client_pipeline() {
 
 #[tokio::test]
 async fn burst_invalid_tls_probes_are_masked_verbatim() {
+    let proxy_shared = ProxySharedState::new();
+
     const N: usize = 12;
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2372,6 +2425,7 @@ async fn burst_invalid_tls_probes_are_masked_verbatim() {
             .parse()
             .unwrap();
         let probe_bytes = probe.clone();
+        let proxy_shared_task = proxy_shared.clone();
 
         let h = tokio::spawn(async move {
             let handler = tokio::spawn(handle_client_stream(
@@ -2388,6 +2442,7 @@ async fn burst_invalid_tls_probes_are_masked_verbatim() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared_task,
                 false,
             ));
 
@@ -3238,6 +3293,7 @@ async fn relay_connect_error_releases_user_and_ip_before_return() {
 
     let stats = Arc::new(Stats::new());
     let ip_tracker = Arc::new(UserIpTracker::new());
+    let proxy_shared = ProxySharedState::new();
 
     let mut config = ProxyConfig::default();
     config.access.user_max_tcp_conns.insert(user.to_string(), 1);
@@ -3301,6 +3357,7 @@ async fn relay_connect_error_releases_user_and_ip_before_return() {
         "127.0.0.1:443".parse().unwrap(),
         peer_addr,
         ip_tracker.clone(),
+        proxy_shared.clone(),
     )
     .await;
 
@@ -3801,6 +3858,8 @@ async fn atomic_limit_gate_allows_only_one_concurrent_acquire() {
 
 #[tokio::test]
 async fn untrusted_proxy_header_source_is_rejected() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.server.proxy_protocol_trusted_cidrs = vec!["10.10.0.0/16".parse().unwrap()];
@@ -3850,6 +3909,7 @@ async fn untrusted_proxy_header_source_is_rejected() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         true,
     ));
 
@@ -3871,6 +3931,8 @@ async fn untrusted_proxy_header_source_is_rejected() {
 
 #[tokio::test]
 async fn empty_proxy_trusted_cidrs_rejects_proxy_header_by_default() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.server.proxy_protocol_trusted_cidrs.clear();
@@ -3920,6 +3982,7 @@ async fn empty_proxy_trusted_cidrs_rejects_proxy_header_by_default() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         true,
     ));
 
@@ -3941,6 +4004,8 @@ async fn empty_proxy_trusted_cidrs_rejects_proxy_header_by_default() {
 
 #[tokio::test]
 async fn oversized_tls_record_is_masked_in_generic_stream_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
     let probe = [
@@ -4017,6 +4082,7 @@ async fn oversized_tls_record_is_masked_in_generic_stream_pipeline() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -4041,6 +4107,8 @@ async fn oversized_tls_record_is_masked_in_generic_stream_pipeline() {
 
 #[tokio::test]
 async fn oversized_tls_record_is_masked_in_client_handler_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = mask_listener.local_addr().unwrap();
 
@@ -4131,6 +4199,7 @@ async fn oversized_tls_record_is_masked_in_client_handler_pipeline() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared.clone(),
                 false,
                 real_peer_report,
             )
@@ -4161,6 +4230,8 @@ async fn oversized_tls_record_is_masked_in_client_handler_pipeline() {
 
 #[tokio::test]
 async fn tls_record_len_min_minus_1_is_rejected_in_generic_stream_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
     let probe = [
@@ -4237,6 +4308,7 @@ async fn tls_record_len_min_minus_1_is_rejected_in_generic_stream_pipeline() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -4261,6 +4333,8 @@ async fn tls_record_len_min_minus_1_is_rejected_in_generic_stream_pipeline() {
 
 #[tokio::test]
 async fn tls_record_len_min_minus_1_is_rejected_in_client_handler_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = mask_listener.local_addr().unwrap();
 
@@ -4351,6 +4425,7 @@ async fn tls_record_len_min_minus_1_is_rejected_in_client_handler_pipeline() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared.clone(),
                 false,
                 real_peer_report,
             )
@@ -4381,6 +4456,8 @@ async fn tls_record_len_min_minus_1_is_rejected_in_client_handler_pipeline() {
 
 #[tokio::test]
 async fn tls_record_len_16384_is_accepted_in_generic_stream_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -4446,6 +4523,7 @@ async fn tls_record_len_16384_is_accepted_in_generic_stream_pipeline() {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -4479,6 +4557,8 @@ async fn tls_record_len_16384_is_accepted_in_generic_stream_pipeline() {
 
 #[tokio::test]
 async fn tls_record_len_16384_is_accepted_in_client_handler_pipeline() {
+    let proxy_shared = ProxySharedState::new();
+
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = mask_listener.local_addr().unwrap();
 
@@ -4558,6 +4638,7 @@ async fn tls_record_len_16384_is_accepted_in_client_handler_pipeline() {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared.clone(),
                 false,
                 real_peer_report,
             )

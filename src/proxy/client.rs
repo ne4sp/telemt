@@ -85,6 +85,7 @@ use crate::proxy::handshake::{HandshakeSuccess, handle_mtproto_handshake, handle
 use crate::proxy::masking::handle_bad_client;
 use crate::proxy::middle_relay::handle_via_middle_proxy;
 use crate::proxy::route_mode::{RelayRouteMode, RouteRuntimeController};
+use crate::proxy::ProxySharedState;
 
 fn beobachten_ttl(config: &ProxyConfig) -> Duration {
     const BEOBACHTEN_TTL_MAX_MINUTES: u64 = 24 * 60;
@@ -356,6 +357,7 @@ pub async fn handle_client_stream<S>(
     tls_cache: Option<Arc<TlsFrontCache>>,
     ip_tracker: Arc<UserIpTracker>,
     beobachten: Arc<BeobachtenStore>,
+    proxy_shared: Arc<ProxySharedState>,
     proxy_protocol_enabled: bool,
 ) -> Result<()>
 where
@@ -552,7 +554,7 @@ where
 
             let (mut tls_reader, tls_writer, tls_user) = match handle_tls_handshake(
                 &handshake, read_half, write_half, real_peer,
-                &config, &replay_checker, &rng, tls_cache.clone(),
+                &config, &replay_checker, proxy_shared.as_ref(), &rng, tls_cache.clone(),
             ).await {
                 HandshakeResult::Success(result) => result,
                 HandshakeResult::BadClient { reader, writer } => {
@@ -580,7 +582,7 @@ where
 
             let (crypto_reader, crypto_writer, success) = match handle_mtproto_handshake(
                 &mtproto_handshake, tls_reader, tls_writer, real_peer,
-                &config, &replay_checker, true, Some(tls_user.as_str()),
+                &config, &replay_checker, proxy_shared.as_ref(), true, Some(tls_user.as_str()),
             ).await {
                 HandshakeResult::Success(result) => result,
                 HandshakeResult::BadClient { reader, writer } => {
@@ -619,6 +621,7 @@ where
                     upstream_manager, stats, config, buffer_pool, rng, me_pool,
                     route_runtime.clone(),
                     local_addr, real_peer, ip_tracker.clone(),
+                    proxy_shared.clone(),
                 ),
             )))
         } else {
@@ -646,7 +649,7 @@ where
 
             let (crypto_reader, crypto_writer, success) = match handle_mtproto_handshake(
                 &handshake, read_half, write_half, real_peer,
-                &config, &replay_checker, false, None,
+                &config, &replay_checker, proxy_shared.as_ref(), false, None,
             ).await {
                 HandshakeResult::Success(result) => result,
                 HandshakeResult::BadClient { reader, writer } => {
@@ -679,6 +682,7 @@ where
                     local_addr,
                     real_peer,
                     ip_tracker.clone(),
+                    proxy_shared.clone(),
                 )
             )))
         }
@@ -731,6 +735,7 @@ pub struct RunningClientHandler {
     tls_cache: Option<Arc<TlsFrontCache>>,
     ip_tracker: Arc<UserIpTracker>,
     beobachten: Arc<BeobachtenStore>,
+    proxy_shared: Arc<ProxySharedState>,
     proxy_protocol_enabled: bool,
 }
 
@@ -749,6 +754,7 @@ impl ClientHandler {
         tls_cache: Option<Arc<TlsFrontCache>>,
         ip_tracker: Arc<UserIpTracker>,
         beobachten: Arc<BeobachtenStore>,
+        proxy_shared: Arc<ProxySharedState>,
         proxy_protocol_enabled: bool,
         real_peer_report: Arc<std::sync::Mutex<Option<SocketAddr>>>,
     ) -> RunningClientHandler {
@@ -769,6 +775,7 @@ impl ClientHandler {
             tls_cache,
             ip_tracker,
             beobachten,
+            proxy_shared,
             proxy_protocol_enabled,
         }
     }
@@ -1065,6 +1072,7 @@ impl RunningClientHandler {
             peer,
             &config,
             &replay_checker,
+            self.proxy_shared.as_ref(),
             &self.rng,
             self.tls_cache.clone(),
         )
@@ -1102,6 +1110,7 @@ impl RunningClientHandler {
             peer,
             &config,
             &replay_checker,
+            self.proxy_shared.as_ref(),
             true,
             Some(tls_user.as_str()),
         )
@@ -1154,6 +1163,7 @@ impl RunningClientHandler {
                 local_addr,
                 peer,
                 self.ip_tracker,
+                self.proxy_shared,
             ),
         )))
     }
@@ -1199,6 +1209,7 @@ impl RunningClientHandler {
             peer,
             &config,
             &replay_checker,
+            self.proxy_shared.as_ref(),
             false,
             None,
         )
@@ -1235,6 +1246,7 @@ impl RunningClientHandler {
                 local_addr,
                 peer,
                 self.ip_tracker,
+                self.proxy_shared,
             ),
         )))
     }
@@ -1257,6 +1269,7 @@ impl RunningClientHandler {
         local_addr: SocketAddr,
         peer_addr: SocketAddr,
         ip_tracker: Arc<UserIpTracker>,
+        proxy_shared: Arc<ProxySharedState>,
     ) -> Result<()>
     where
         R: AsyncRead + Unpin + Send + 'static,
@@ -1296,6 +1309,7 @@ impl RunningClientHandler {
                     buffer_pool,
                     local_addr,
                     rng,
+                    proxy_shared.clone(),
                     route_runtime.subscribe(),
                     route_snapshot,
                     session_id,

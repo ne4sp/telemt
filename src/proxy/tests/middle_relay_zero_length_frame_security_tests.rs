@@ -1,5 +1,6 @@
 use super::*;
 use crate::crypto::AesCtr;
+use crate::proxy::ProxySharedState;
 use crate::stats::Stats;
 use crate::stream::{BufferPool, CryptoReader};
 use std::sync::Arc;
@@ -24,12 +25,14 @@ fn encrypt_for_reader(plaintext: &[u8]) -> Vec<u8> {
 }
 
 fn make_forensics(conn_id: u64, started_at: Instant) -> RelayForensicsState {
+    let shared = ProxySharedState::new();
+    let ip: std::net::IpAddr = "127.0.0.1".parse().expect("ip parse must succeed");
     RelayForensicsState {
         trace_id: 0xB000_0000 + conn_id,
         conn_id,
         user: format!("zero-len-test-user-{conn_id}"),
         peer: "127.0.0.1:50000".parse().expect("peer parse must succeed"),
-        peer_hash: hash_ip("127.0.0.1".parse().expect("ip parse must succeed")),
+        peer_hash: hash_ip(shared.as_ref(), ip),
         started_at,
         bytes_c2me: 0,
         bytes_me2c: Arc::new(AtomicU64::new(0)),

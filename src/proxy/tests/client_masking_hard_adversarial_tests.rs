@@ -6,6 +6,7 @@ use crate::protocol::tls;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, Instant};
+use crate::proxy::ProxySharedState;
 
 struct Harness {
     config: Arc<ProxyConfig>,
@@ -17,6 +18,7 @@ struct Harness {
     route_runtime: Arc<RouteRuntimeController>,
     ip_tracker: Arc<UserIpTracker>,
     beobachten: Arc<BeobachtenStore>,
+    proxy_shared: Arc<ProxySharedState>,
 }
 
 fn new_upstream_manager(stats: Arc<Stats>) -> Arc<UpstreamManager> {
@@ -67,6 +69,7 @@ fn build_harness(secret_hex: &str, mask_port: u16) -> Harness {
         route_runtime: Arc::new(RouteRuntimeController::new(RelayRouteMode::Direct)),
         ip_tracker: Arc::new(UserIpTracker::new()),
         beobachten: Arc::new(BeobachtenStore::new()),
+        proxy_shared: ProxySharedState::new(),
     }
 }
 
@@ -156,6 +159,7 @@ async fn run_tls_success_mtproto_fail_capture(
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -194,6 +198,8 @@ async fn run_tls_success_mtproto_fail_capture(
 
 #[tokio::test]
 async fn masking_budget_survives_zero_handshake_timeout_with_delay() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -232,6 +238,7 @@ async fn masking_budget_survives_zero_handshake_timeout_with_delay() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -276,6 +283,8 @@ async fn tls_mtproto_fail_forwards_only_trailing_record() {
 
 #[tokio::test]
 async fn replayed_tls_hello_gets_no_serverhello_and_is_masked() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -312,6 +321,7 @@ async fn replayed_tls_hello_gets_no_serverhello_and_is_masked() {
         let route = harness.route_runtime.clone();
         let ipt = harness.ip_tracker.clone();
         let beob = harness.beobachten.clone();
+        let ps = harness.proxy_shared.clone();
         let hello = hello.clone();
         let invalid_mtproto_record = invalid_mtproto_record.clone();
         let first_tail = first_tail.clone();
@@ -331,6 +341,7 @@ async fn replayed_tls_hello_gets_no_serverhello_and_is_masked() {
                 None,
                 ipt,
                 beob,
+                ps,
                 false,
             ));
 
@@ -374,6 +385,8 @@ async fn replayed_tls_hello_gets_no_serverhello_and_is_masked() {
 
 #[tokio::test]
 async fn connects_bad_increments_once_per_invalid_mtproto() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -408,6 +421,7 @@ async fn connects_bad_increments_once_per_invalid_mtproto() {
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -437,6 +451,8 @@ async fn connects_bad_increments_once_per_invalid_mtproto() {
 
 #[tokio::test]
 async fn truncated_clienthello_forwards_only_seen_prefix() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -473,6 +489,7 @@ async fn truncated_clienthello_forwards_only_seen_prefix() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -500,6 +517,8 @@ async fn truncated_clienthello_forwards_only_seen_prefix() {
 
 #[tokio::test]
 async fn out_of_bounds_tls_len_forwards_header_only() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -534,6 +553,7 @@ async fn out_of_bounds_tls_len_forwards_header_only() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -555,6 +575,8 @@ async fn out_of_bounds_tls_len_forwards_header_only() {
 
 #[tokio::test]
 async fn non_tls_with_modes_disabled_is_masked() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -590,6 +612,7 @@ async fn non_tls_with_modes_disabled_is_masked() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -611,6 +634,8 @@ async fn non_tls_with_modes_disabled_is_masked() {
 
 #[tokio::test]
 async fn concurrent_tls_mtproto_fail_sessions_are_isolated() {
+    let proxy_shared = ProxySharedState::new();
+
     let sessions = 12usize;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
@@ -665,6 +690,7 @@ async fn concurrent_tls_mtproto_fail_sessions_are_isolated() {
                 None,
                 harness.ip_tracker,
                 harness.beobachten,
+                ProxySharedState::new(),
                 false,
             ));
 

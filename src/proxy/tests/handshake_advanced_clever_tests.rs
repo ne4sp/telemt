@@ -4,14 +4,9 @@ use crate::protocol::constants::{ProtoTag, RESERVED_NONCE_BEGINNINGS, RESERVED_N
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use crate::proxy::ProxySharedState;
 
 // --- Helpers ---
-
-fn auth_probe_test_guard() -> std::sync::MutexGuard<'static, ()> {
-    auth_probe_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 fn test_config_with_secret_hex(secret_hex: &str) -> ProxyConfig {
     let mut cfg = ProxyConfig::default();
@@ -147,9 +142,7 @@ fn make_valid_tls_client_hello_with_alpn(
 
 #[tokio::test]
 async fn tls_minimum_viable_length_boundary() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret = [0x11u8; 16];
     let config = test_config_with_secret_hex("11111111111111111111111111111111");
     let replay_checker = ReplayChecker::new(128, Duration::from_secs(60));
@@ -171,6 +164,7 @@ async fn tls_minimum_viable_length_boundary() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -188,6 +182,7 @@ async fn tls_minimum_viable_length_boundary() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -200,9 +195,7 @@ async fn tls_minimum_viable_length_boundary() {
 
 #[tokio::test]
 async fn mtproto_extreme_dc_index_serialization() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret_hex = "22222222222222222222222222222222";
     let config = test_config_with_secret_hex(secret_hex);
     for (idx, extreme_dc) in [i16::MIN, i16::MAX, -1, 0].into_iter().enumerate() {
@@ -218,6 +211,7 @@ async fn mtproto_extreme_dc_index_serialization() {
             peer,
             &config,
             &replay_checker,
+            proxy_shared.as_ref(),
             false,
             None,
         )
@@ -241,9 +235,7 @@ async fn mtproto_extreme_dc_index_serialization() {
 
 #[tokio::test]
 async fn alpn_strict_case_and_padding_rejection() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret = [0x33u8; 16];
     let mut config = test_config_with_secret_hex("33333333333333333333333333333333");
     config.censorship.alpn_enforce = true;
@@ -262,6 +254,7 @@ async fn alpn_strict_case_and_padding_rejection() {
             peer,
             &config,
             &replay_checker,
+            proxy_shared.as_ref(),
             &rng,
             None,
         )
@@ -297,9 +290,7 @@ fn ipv4_mapped_ipv6_bucketing_anomaly() {
 
 #[tokio::test]
 async fn mtproto_invalid_ciphertext_does_not_poison_replay_cache() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret_hex = "55555555555555555555555555555555";
     let config = test_config_with_secret_hex(secret_hex);
     let replay_checker = ReplayChecker::new(128, Duration::from_secs(60));
@@ -316,6 +307,7 @@ async fn mtproto_invalid_ciphertext_does_not_poison_replay_cache() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         false,
         None,
     )
@@ -329,6 +321,7 @@ async fn mtproto_invalid_ciphertext_does_not_poison_replay_cache() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         false,
         None,
     )
@@ -341,9 +334,7 @@ async fn mtproto_invalid_ciphertext_does_not_poison_replay_cache() {
 
 #[tokio::test]
 async fn tls_invalid_session_does_not_poison_replay_cache() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret = [0x66u8; 16];
     let config = test_config_with_secret_hex("66666666666666666666666666666666");
     let replay_checker = ReplayChecker::new(128, Duration::from_secs(60));
@@ -362,6 +353,7 @@ async fn tls_invalid_session_does_not_poison_replay_cache() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -375,6 +367,7 @@ async fn tls_invalid_session_does_not_poison_replay_cache() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -387,9 +380,7 @@ async fn tls_invalid_session_does_not_poison_replay_cache() {
 
 #[tokio::test]
 async fn server_hello_delay_timing_neutrality_on_hmac_failure() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret = [0x77u8; 16];
     let mut config = test_config_with_secret_hex("77777777777777777777777777777777");
     config.censorship.server_hello_delay_min_ms = 50;
@@ -410,6 +401,7 @@ async fn server_hello_delay_timing_neutrality_on_hmac_failure() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -425,9 +417,7 @@ async fn server_hello_delay_timing_neutrality_on_hmac_failure() {
 
 #[tokio::test]
 async fn server_hello_delay_inversion_resilience() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret = [0x88u8; 16];
     let mut config = test_config_with_secret_hex("88888888888888888888888888888888");
     config.censorship.server_hello_delay_min_ms = 100;
@@ -447,6 +437,7 @@ async fn server_hello_delay_inversion_resilience() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -462,9 +453,8 @@ async fn server_hello_delay_inversion_resilience() {
 
 #[tokio::test]
 async fn mixed_valid_and_invalid_user_secrets_configuration() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-    let _warn_guard = warned_secrets_test_lock().lock().unwrap();
+    let proxy_shared = ProxySharedState::new();
+        let _warn_guard = warned_secrets_test_lock().lock().unwrap();
     clear_warned_secrets_for_testing();
 
     let mut config = ProxyConfig::default();
@@ -500,6 +490,7 @@ async fn mixed_valid_and_invalid_user_secrets_configuration() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -513,9 +504,7 @@ async fn mixed_valid_and_invalid_user_secrets_configuration() {
 
 #[tokio::test]
 async fn tls_emulation_fallback_when_cache_missing() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret = [0xAAu8; 16];
     let mut config = test_config_with_secret_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     config.censorship.tls_emulation = true;
@@ -534,6 +523,7 @@ async fn tls_emulation_fallback_when_cache_missing() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         &rng,
         None,
     )
@@ -547,9 +537,7 @@ async fn tls_emulation_fallback_when_cache_missing() {
 
 #[tokio::test]
 async fn classic_mode_over_tls_transport_protocol_confusion() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let proxy_shared = ProxySharedState::new();
     let secret_hex = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     let mut config = test_config_with_secret_hex(secret_hex);
     config.general.modes.classic = true;
@@ -567,6 +555,7 @@ async fn classic_mode_over_tls_transport_protocol_confusion() {
         peer,
         &config,
         &replay_checker,
+        proxy_shared.as_ref(),
         true,
         None,
     )
@@ -608,18 +597,17 @@ fn generate_tg_nonce_never_emits_reserved_bytes() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dashmap_concurrent_saturation_stress() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
+    let shared = ProxySharedState::new();
     let ip_a: IpAddr = "192.0.2.13".parse().unwrap();
     let ip_b: IpAddr = "198.51.100.13".parse().unwrap();
     let mut tasks = Vec::new();
 
     for i in 0..100 {
         let target_ip = if i % 2 == 0 { ip_a } else { ip_b };
+        let shared_task = shared.clone();
         tasks.push(tokio::spawn(async move {
             for _ in 0..50 {
-                auth_probe_record_failure(target_ip, Instant::now());
+                auth_probe_record_failure(shared_task.as_ref(), target_ip, Instant::now());
             }
         }));
     }
@@ -629,12 +617,13 @@ async fn dashmap_concurrent_saturation_stress() {
             .expect("Task panicked during concurrent DashMap stress");
     }
 
+    let now = Instant::now();
     assert!(
-        auth_probe_is_throttled_for_testing(ip_a),
+        auth_probe_is_throttled(shared.as_ref(), ip_a, now),
         "IP A must be throttled after concurrent stress"
     );
     assert!(
-        auth_probe_is_throttled_for_testing(ip_b),
+        auth_probe_is_throttled(shared.as_ref(), ip_b, now),
         "IP B must be throttled after concurrent stress"
     );
 }
@@ -661,15 +650,13 @@ fn prototag_invalid_bytes_fail_closed() {
 
 #[test]
 fn auth_probe_eviction_hash_collision_stress() {
-    let _guard = auth_probe_test_guard();
-    clear_auth_probe_state_for_testing();
-
-    let state = auth_probe_state_map();
+    let shared = ProxySharedState::new();
+    let state = &shared.auth_probe;
     let now = Instant::now();
 
     for i in 0..10_000u32 {
         let ip = IpAddr::V4(Ipv4Addr::new(10, 0, (i >> 8) as u8, (i & 0xFF) as u8));
-        auth_probe_record_failure_with_state(state, ip, now);
+        auth_probe_record_failure_with_state(shared.as_ref(), ip, now);
     }
 
     assert!(

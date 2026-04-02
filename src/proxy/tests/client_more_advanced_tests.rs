@@ -5,6 +5,7 @@ use crate::transport::UpstreamManager;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
+use crate::proxy::ProxySharedState;
 
 fn preload_user_quota(stats: &Stats, user: &str, bytes: u64) {
     let user_stats = stats.get_or_create_user_stats_handle(user);
@@ -84,6 +85,8 @@ async fn boundary_user_expiration_in_past_rejects() {
 
 #[tokio::test]
 async fn blackhat_proxy_protocol_massive_garbage_rejected_quickly() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.server.proxy_protocol_header_timeout_ms = 300;
     let config = Arc::new(cfg);
@@ -113,6 +116,7 @@ async fn blackhat_proxy_protocol_massive_garbage_rejected_quickly() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         true,
     ));
 
@@ -128,6 +132,8 @@ async fn blackhat_proxy_protocol_massive_garbage_rejected_quickly() {
 
 #[tokio::test]
 async fn edge_tls_body_immediate_eof_triggers_masking_and_bad_connect() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = true;
     cfg.general.beobachten_minutes = 1;
@@ -160,6 +166,7 @@ async fn edge_tls_body_immediate_eof_triggers_masking_and_bad_connect() {
         None,
         Arc::new(UserIpTracker::new()),
         beobachten.clone(),
+        proxy_shared.clone(),
         false,
     ));
 
@@ -178,6 +185,8 @@ async fn edge_tls_body_immediate_eof_triggers_masking_and_bad_connect() {
 
 #[tokio::test]
 async fn security_classic_mode_disabled_masks_valid_length_payload() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.modes.classic = false;
     cfg.general.modes.secure = false;
@@ -210,6 +219,7 @@ async fn security_classic_mode_disabled_masks_valid_length_payload() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 

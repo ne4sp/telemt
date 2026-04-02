@@ -10,6 +10,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf, duplex};
 use tokio::net::TcpListener;
+use crate::proxy::ProxySharedState;
 
 #[test]
 fn edge_mask_reject_delay_min_greater_than_max_does_not_panic() {
@@ -73,6 +74,8 @@ fn edge_beobachten_record_handshake_failure_class_stream_error_eof() {
 
 #[tokio::test]
 async fn adversarial_tls_handshake_timeout_during_masking_delay() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = false;
     cfg.timeouts.client_handshake = 1;
@@ -107,6 +110,7 @@ async fn adversarial_tls_handshake_timeout_during_masking_delay() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -126,6 +130,8 @@ async fn adversarial_tls_handshake_timeout_during_masking_delay() {
 
 #[tokio::test]
 async fn blackhat_proxy_protocol_slowloris_timeout() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.server.proxy_protocol_header_timeout_ms = 200;
     let config = Arc::new(cfg);
@@ -155,6 +161,7 @@ async fn blackhat_proxy_protocol_slowloris_timeout() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         true,
     ));
 
@@ -179,6 +186,8 @@ fn blackhat_ipv4_mapped_ipv6_proxy_source_bypass_attempt() {
 
 #[tokio::test]
 async fn negative_proxy_protocol_enabled_but_client_sends_tls_hello() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.server.proxy_protocol_header_timeout_ms = 500;
     let config = Arc::new(cfg);
@@ -208,6 +217,7 @@ async fn negative_proxy_protocol_enabled_but_client_sends_tls_hello() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         true,
     ));
 
@@ -227,6 +237,8 @@ async fn negative_proxy_protocol_enabled_but_client_sends_tls_hello() {
 
 #[tokio::test]
 async fn edge_client_stream_exactly_4_bytes_eof() {
+    let proxy_shared = ProxySharedState::new();
+
     let config = Arc::new(ProxyConfig::default());
     let stats = Arc::new(Stats::new());
     let beobachten = Arc::new(BeobachtenStore::new());
@@ -255,6 +267,7 @@ async fn edge_client_stream_exactly_4_bytes_eof() {
         None,
         Arc::new(UserIpTracker::new()),
         beobachten.clone(),
+        proxy_shared.clone(),
         false,
     ));
 
@@ -272,6 +285,8 @@ async fn edge_client_stream_exactly_4_bytes_eof() {
 
 #[tokio::test]
 async fn edge_client_stream_tls_header_valid_but_body_1_byte_short_eof() {
+    let proxy_shared = ProxySharedState::new();
+
     let config = Arc::new(ProxyConfig::default());
     let stats = Arc::new(Stats::new());
 
@@ -299,6 +314,7 @@ async fn edge_client_stream_tls_header_valid_but_body_1_byte_short_eof() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -315,6 +331,8 @@ async fn edge_client_stream_tls_header_valid_but_body_1_byte_short_eof() {
 
 #[tokio::test]
 async fn integration_non_tls_modes_disabled_immediately_masks() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.modes.classic = false;
     cfg.general.modes.secure = false;
@@ -346,6 +364,7 @@ async fn integration_non_tls_modes_disabled_immediately_masks() {
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 

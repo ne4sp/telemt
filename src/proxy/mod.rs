@@ -67,8 +67,10 @@ pub mod middle_relay;
 pub mod relay;
 pub mod route_mode;
 pub mod session_eviction;
+pub mod shared_state;
 
 pub use client::ClientHandler;
+pub use shared_state::ProxySharedState;
 #[allow(unused_imports)]
 pub use handshake::*;
 #[allow(unused_imports)]

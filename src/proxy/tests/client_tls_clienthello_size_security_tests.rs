@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
+use crate::proxy::ProxySharedState;
 
 fn test_probe_for_len(len: usize) -> [u8; 5] {
     [
@@ -43,6 +44,7 @@ fn make_test_upstream_manager(stats: Arc<Stats>) -> Arc<UpstreamManager> {
 }
 
 async fn run_probe_and_assert_masking(len: usize, expect_bad_increment: bool) {
+    let proxy_shared = ProxySharedState::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
     let probe = test_probe_for_len(len);
@@ -95,6 +97,7 @@ async fn run_probe_and_assert_masking(len: usize, expect_bad_increment: bool) {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 

@@ -5,6 +5,7 @@ use crate::protocol::constants::{HANDSHAKE_LEN, TLS_VERSION};
 use crate::protocol::tls;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
+use crate::proxy::ProxySharedState;
 
 struct PipelineHarness {
     config: Arc<ProxyConfig>,
@@ -194,6 +195,8 @@ async fn light_fuzz_empty_initial_data_never_prefetches_any_bytes() {
 
 #[tokio::test]
 async fn blackhat_integration_empty_initial_data_path_is_byte_exact_and_eof_clean() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -237,6 +240,7 @@ async fn blackhat_integration_empty_initial_data_path_is_byte_exact_and_eof_clea
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 

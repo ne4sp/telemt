@@ -6,6 +6,7 @@ use crate::protocol::tls;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::time::{Duration, Instant};
+use crate::proxy::ProxySharedState;
 
 fn new_upstream_manager(stats: Arc<Stats>) -> Arc<UpstreamManager> {
     Arc::new(UpstreamManager::new(
@@ -94,6 +95,7 @@ async fn run_replay_candidate_session(
         None,
         Arc::new(UserIpTracker::new()),
         beobachten,
+        ProxySharedState::new(),
         false,
     ));
 

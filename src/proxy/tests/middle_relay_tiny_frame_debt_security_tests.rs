@@ -1,4 +1,5 @@
 use super::*;
+use crate::proxy::ProxySharedState;
 use crate::crypto::AesCtr;
 use crate::stats::Stats;
 use crate::stream::{BufferPool, CryptoReader};
@@ -23,13 +24,18 @@ fn encrypt_for_reader(plaintext: &[u8]) -> Vec<u8> {
     cipher.encrypt(plaintext)
 }
 
-fn make_forensics(conn_id: u64, started_at: Instant) -> RelayForensicsState {
+fn make_forensics(
+    shared: &ProxySharedState,
+    conn_id: u64,
+    started_at: Instant,
+) -> RelayForensicsState {
+    let peer_ip: std::net::IpAddr = "127.0.0.1".parse().expect("ip parse must succeed");
     RelayForensicsState {
         trace_id: 0xB100_0000 + conn_id,
         conn_id,
         user: format!("tiny-frame-debt-user-{conn_id}"),
         peer: "127.0.0.1:50000".parse().expect("peer parse must succeed"),
-        peer_hash: hash_ip("127.0.0.1".parse().expect("ip parse must succeed")),
+        peer_hash: super::hash_ip(shared, peer_ip),
         started_at,
         bytes_c2me: 0,
         bytes_me2c: Arc::new(AtomicU64::new(0)),
@@ -58,6 +64,7 @@ async fn read_bounded(
     idle_state: &mut RelayClientIdleState,
     last_downstream_activity_ms: &AtomicU64,
     session_started_at: Instant,
+    proxy_shared: &ProxySharedState,
 ) -> Result<Option<(PooledBuffer, bool)>> {
     run_relay_test_step_timeout(
         "tiny-frame debt read step",
@@ -73,6 +80,7 @@ async fn read_bounded(
             idle_state,
             last_downstream_activity_ms,
             session_started_at,
+            proxy_shared,
         ),
     )
     .await
@@ -267,12 +275,13 @@ fn stress_many_independent_simulations_keep_isolated_debt_state() {
 
 #[tokio::test]
 async fn idle_policy_enabled_intermediate_zero_length_flood_is_fail_closed() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(4096);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(11, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 11, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -294,6 +303,7 @@ async fn idle_policy_enabled_intermediate_zero_length_flood_is_fail_closed() {
         &mut idle_state,
         &last_downstream_activity_ms,
         session_started_at,
+        proxy_shared.as_ref(),
     )
     .await;
 
@@ -302,12 +312,13 @@ async fn idle_policy_enabled_intermediate_zero_length_flood_is_fail_closed() {
 
 #[tokio::test]
 async fn idle_policy_enabled_secure_zero_length_flood_is_fail_closed() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(4096);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(12, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 12, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -329,6 +340,7 @@ async fn idle_policy_enabled_secure_zero_length_flood_is_fail_closed() {
         &mut idle_state,
         &last_downstream_activity_ms,
         session_started_at,
+        proxy_shared.as_ref(),
     )
     .await;
 
@@ -337,12 +349,13 @@ async fn idle_policy_enabled_secure_zero_length_flood_is_fail_closed() {
 
 #[tokio::test]
 async fn intermediate_alternating_zero_and_real_eventually_closes() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(8192);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(13, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 13, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -371,6 +384,7 @@ async fn intermediate_alternating_zero_and_real_eventually_closes() {
             &mut idle_state,
             &last_downstream_activity_ms,
             session_started_at,
+            proxy_shared.as_ref(),
         )
         .await;
 
@@ -390,12 +404,13 @@ async fn intermediate_alternating_zero_and_real_eventually_closes() {
 
 #[tokio::test]
 async fn small_tiny_burst_followed_by_real_frame_does_not_spuriously_close() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(1024);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(14, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 14, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -422,6 +437,7 @@ async fn small_tiny_burst_followed_by_real_frame_does_not_spuriously_close() {
         &mut idle_state,
         &last_downstream_activity_ms,
         session_started_at,
+        proxy_shared.as_ref(),
     )
     .await;
 
@@ -434,12 +450,13 @@ async fn small_tiny_burst_followed_by_real_frame_does_not_spuriously_close() {
 
 #[tokio::test]
 async fn idle_policy_enabled_zero_length_flood_is_fail_closed() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(4096);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(1, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 1, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -464,6 +481,7 @@ async fn idle_policy_enabled_zero_length_flood_is_fail_closed() {
         &mut idle_state,
         &last_downstream_activity_ms,
         session_started_at,
+        proxy_shared.as_ref(),
     )
     .await;
 
@@ -475,12 +493,13 @@ async fn idle_policy_enabled_zero_length_flood_is_fail_closed() {
 
 #[tokio::test]
 async fn idle_policy_enabled_alternating_tiny_real_eventually_closes() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(8192);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(2, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 2, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -513,6 +532,7 @@ async fn idle_policy_enabled_alternating_tiny_real_eventually_closes() {
             &mut idle_state,
             &last_downstream_activity_ms,
             session_started_at,
+            proxy_shared.as_ref(),
         )
         .await;
 
@@ -536,12 +556,13 @@ async fn idle_policy_enabled_alternating_tiny_real_eventually_closes() {
 
 #[tokio::test]
 async fn enabled_idle_policy_valid_nonzero_frame_still_passes() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(1024);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(3, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 3, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -569,6 +590,7 @@ async fn enabled_idle_policy_valid_nonzero_frame_still_passes() {
         &mut idle_state,
         &last_downstream_activity_ms,
         session_started_at,
+        proxy_shared.as_ref(),
     )
     .await
     .expect("valid frame should decode")
@@ -581,12 +603,13 @@ async fn enabled_idle_policy_valid_nonzero_frame_still_passes() {
 
 #[tokio::test]
 async fn abridged_quickack_tiny_flood_is_fail_closed() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(4096);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(21, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 21, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -608,6 +631,7 @@ async fn abridged_quickack_tiny_flood_is_fail_closed() {
         &mut idle_state,
         &last_downstream_activity_ms,
         session_started_at,
+        proxy_shared.as_ref(),
     )
     .await;
 
@@ -619,12 +643,13 @@ async fn abridged_quickack_tiny_flood_is_fail_closed() {
 
 #[tokio::test]
 async fn abridged_extended_zero_len_flood_is_fail_closed() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(4096);
     let mut crypto_reader = make_crypto_reader(reader);
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(22, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 22, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -649,6 +674,7 @@ async fn abridged_extended_zero_len_flood_is_fail_closed() {
         &mut idle_state,
         &last_downstream_activity_ms,
         session_started_at,
+        proxy_shared.as_ref(),
     )
     .await;
 
@@ -660,6 +686,7 @@ async fn abridged_extended_zero_len_flood_is_fail_closed() {
 
 #[tokio::test]
 async fn one_to_eight_abridged_wire_pattern_survives_without_false_positive_close() {
+    let proxy_shared = ProxySharedState::new();
     let mut plaintext = Vec::with_capacity(9 * 300);
     for idx in 0..300usize {
         plaintext.push(0x00);
@@ -678,7 +705,7 @@ async fn one_to_eight_abridged_wire_pattern_survives_without_false_positive_clos
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
     let session_started_at = Instant::now();
-    let forensics = make_forensics(23, session_started_at);
+    let forensics = make_forensics(proxy_shared.as_ref(), 23, session_started_at);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(session_started_at);
     let idle_policy = make_enabled_idle_policy();
@@ -701,6 +728,7 @@ async fn one_to_eight_abridged_wire_pattern_survives_without_false_positive_clos
             &mut idle_state,
             &last_downstream_activity_ms,
             session_started_at,
+            proxy_shared.as_ref(),
         )
         .await
         {
@@ -722,6 +750,7 @@ async fn one_to_eight_abridged_wire_pattern_survives_without_false_positive_clos
 
 #[tokio::test]
 async fn deterministic_light_fuzz_abridged_wire_behavior_matches_model() {
+    let proxy_shared = ProxySharedState::new();
     let mut seed = 0xD1CE_BAAD_2026_0322u64;
 
     for case_idx in 0..32u64 {
@@ -755,7 +784,7 @@ async fn deterministic_light_fuzz_abridged_wire_behavior_matches_model() {
         let buffer_pool = Arc::new(BufferPool::new());
         let stats = Stats::new();
         let session_started_at = Instant::now();
-        let forensics = make_forensics(500 + case_idx, session_started_at);
+        let forensics = make_forensics(proxy_shared.as_ref(), 500 + case_idx, session_started_at);
         let mut frame_counter = 0u64;
         let mut idle_state = RelayClientIdleState::new(session_started_at);
         let idle_policy = make_enabled_idle_policy();
@@ -782,6 +811,7 @@ async fn deterministic_light_fuzz_abridged_wire_behavior_matches_model() {
                 &mut idle_state,
                 &last_downstream_activity_ms,
                 session_started_at,
+                proxy_shared.as_ref(),
             )
             .await
             {

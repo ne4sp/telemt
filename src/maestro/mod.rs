@@ -33,6 +33,7 @@ use crate::crypto::SecureRandom;
 use crate::ip_tracker::UserIpTracker;
 use crate::network::probe::{decide_network_capabilities, log_probe_result, run_probe};
 use crate::proxy::route_mode::{RelayRouteMode, RouteRuntimeController};
+use crate::proxy::ProxySharedState;
 use crate::startup::{
     COMPONENT_API_BOOTSTRAP, COMPONENT_CONFIG_LOAD, COMPONENT_ME_POOL_CONSTRUCT,
     COMPONENT_ME_POOL_INIT_STAGE1, COMPONENT_ME_PROXY_CONFIG_V4, COMPONENT_ME_PROXY_CONFIG_V6,
@@ -637,6 +638,8 @@ async fn run_inner(
     .await;
     let _admission_tx_hold = admission_tx;
 
+    let proxy_shared = ProxySharedState::new();
+
     let bound = listeners::bind_listeners(
         &config,
         decision.ipv4_dc,
@@ -656,6 +659,7 @@ async fn run_inner(
         tls_cache.clone(),
         ip_tracker.clone(),
         beobachten.clone(),
+        proxy_shared.clone(),
         max_connections.clone(),
     )
     .await?;
@@ -712,6 +716,7 @@ async fn run_inner(
         tls_cache.clone(),
         ip_tracker.clone(),
         beobachten.clone(),
+        proxy_shared.clone(),
         max_connections.clone(),
     );
 

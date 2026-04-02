@@ -6,6 +6,7 @@ use crate::protocol::tls;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
 use tokio::time::{Duration, Instant};
+use crate::proxy::ProxySharedState;
 
 struct PipelineHarness {
     config: Arc<ProxyConfig>,
@@ -105,6 +106,8 @@ where
 
 #[tokio::test]
 async fn masking_runs_outside_handshake_timeout_budget_with_high_reject_delay() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut config = ProxyConfig::default();
     config.general.beobachten = false;
     config.censorship.mask = true;
@@ -135,6 +138,7 @@ async fn masking_runs_outside_handshake_timeout_budget_with_high_reject_delay() 
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 
@@ -171,6 +175,8 @@ async fn masking_runs_outside_handshake_timeout_budget_with_high_reject_delay() 
 
 #[tokio::test]
 async fn tls_mtproto_bad_client_does_not_reinject_clienthello_into_mask_backend() {
+    let proxy_shared = ProxySharedState::new();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
 
@@ -223,6 +229,7 @@ async fn tls_mtproto_bad_client_does_not_reinject_clienthello_into_mask_backend(
         None,
         harness.ip_tracker,
         harness.beobachten,
+        ProxySharedState::new(),
         false,
     ));
 

@@ -12,7 +12,7 @@ use tracing::{debug, error, info, warn};
 use crate::config::ProxyConfig;
 use crate::crypto::SecureRandom;
 use crate::ip_tracker::UserIpTracker;
-use crate::proxy::ClientHandler;
+use crate::proxy::{ClientHandler, ProxySharedState};
 use crate::proxy::route_mode::{ROUTE_SWITCH_ERROR_MSG, RouteRuntimeController};
 use crate::startup::{COMPONENT_LISTENERS_BIND, StartupTracker};
 use crate::stats::beobachten::BeobachtenStore;
@@ -49,6 +49,7 @@ pub(crate) async fn bind_listeners(
     tls_cache: Option<Arc<TlsFrontCache>>,
     ip_tracker: Arc<UserIpTracker>,
     beobachten: Arc<BeobachtenStore>,
+    proxy_shared: Arc<ProxySharedState>,
     max_connections: Arc<Semaphore>,
 ) -> Result<BoundListeners, Box<dyn Error>> {
     startup_tracker
@@ -224,6 +225,7 @@ pub(crate) async fn bind_listeners(
         let tls_cache = tls_cache.clone();
         let ip_tracker = ip_tracker.clone();
         let beobachten = beobachten.clone();
+        let proxy_shared_unix = proxy_shared.clone();
         let max_connections_unix = max_connections.clone();
 
         tokio::spawn(async move {
@@ -284,6 +286,7 @@ pub(crate) async fn bind_listeners(
                         let tls_cache = tls_cache.clone();
                         let ip_tracker = ip_tracker.clone();
                         let beobachten = beobachten.clone();
+                        let proxy_shared_conn = proxy_shared_unix.clone();
                         let proxy_protocol_enabled = config.server.proxy_protocol;
 
                         tokio::spawn(async move {
@@ -302,6 +305,7 @@ pub(crate) async fn bind_listeners(
                                 tls_cache,
                                 ip_tracker,
                                 beobachten,
+                                proxy_shared_conn,
                                 proxy_protocol_enabled,
                             )
                             .await
@@ -351,6 +355,7 @@ pub(crate) fn spawn_tcp_accept_loops(
     tls_cache: Option<Arc<TlsFrontCache>>,
     ip_tracker: Arc<UserIpTracker>,
     beobachten: Arc<BeobachtenStore>,
+    proxy_shared: Arc<ProxySharedState>,
     max_connections: Arc<Semaphore>,
 ) {
     for (listener, listener_proxy_protocol) in listeners {
@@ -366,6 +371,7 @@ pub(crate) fn spawn_tcp_accept_loops(
         let tls_cache = tls_cache.clone();
         let ip_tracker = ip_tracker.clone();
         let beobachten = beobachten.clone();
+        let proxy_shared_tcp = proxy_shared.clone();
         let max_connections_tcp = max_connections.clone();
 
         tokio::spawn(async move {
@@ -421,6 +427,7 @@ pub(crate) fn spawn_tcp_accept_loops(
                         let tls_cache = tls_cache.clone();
                         let ip_tracker = ip_tracker.clone();
                         let beobachten = beobachten.clone();
+                        let proxy_shared_conn = proxy_shared_tcp.clone();
                         let proxy_protocol_enabled = listener_proxy_protocol;
                         let real_peer_report = Arc::new(std::sync::Mutex::new(None));
                         let real_peer_report_for_handler = real_peer_report.clone();
@@ -441,6 +448,7 @@ pub(crate) fn spawn_tcp_accept_loops(
                                 tls_cache,
                                 ip_tracker,
                                 beobachten,
+                                proxy_shared_conn,
                                 proxy_protocol_enabled,
                                 real_peer_report_for_handler,
                             )

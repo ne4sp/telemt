@@ -6,6 +6,7 @@ use crate::protocol::tls;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::TcpListener;
 use tokio::time::Duration;
+use crate::proxy::ProxySharedState;
 
 struct StressHarness {
     config: Arc<ProxyConfig>,
@@ -189,6 +190,7 @@ async fn run_parallel_tail_fallback_case(
                 None,
                 harness.ip_tracker,
                 harness.beobachten,
+                ProxySharedState::new(),
                 false,
             ));
 

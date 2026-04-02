@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 use tokio::net::{TcpListener, TcpStream};
+use crate::proxy::ProxySharedState;
 
 const REPLY_404: &[u8] = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
 
@@ -68,6 +69,7 @@ fn summarize(samples_ms: &[u128]) -> (f64, u128, u128, u128) {
 }
 
 async fn run_generic_once(class: ProbeClass) -> u128 {
+    let proxy_shared = ProxySharedState::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
     let backend_reply = REPLY_404.to_vec();
@@ -123,6 +125,7 @@ async fn run_generic_once(class: ProbeClass) -> u128 {
         None,
         ip_tracker,
         beobachten,
+        proxy_shared.clone(),
         false,
     ));
 
@@ -159,6 +162,7 @@ async fn run_generic_once(class: ProbeClass) -> u128 {
 }
 
 async fn run_client_handler_once(class: ProbeClass) -> u128 {
+    let proxy_shared = ProxySharedState::new();
     let mask_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = mask_listener.local_addr().unwrap();
 
@@ -210,6 +214,7 @@ async fn run_client_handler_once(class: ProbeClass) -> u128 {
         let route_runtime = route_runtime.clone();
         let ip_tracker = ip_tracker.clone();
         let beobachten = beobachten.clone();
+        let proxy_shared = proxy_shared.clone();
 
         tokio::spawn(async move {
             let (stream, peer) = front_listener.accept().await.unwrap();
@@ -228,6 +233,7 @@ async fn run_client_handler_once(class: ProbeClass) -> u128 {
                 None,
                 ip_tracker,
                 beobachten,
+                proxy_shared,
                 false,
                 real_peer_report,
             )

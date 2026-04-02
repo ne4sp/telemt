@@ -1,5 +1,6 @@
 use super::*;
 use crate::crypto::AesCtr;
+use crate::proxy::ProxySharedState;
 use crate::stats::Stats;
 use crate::stream::{BufferPool, CryptoReader};
 use std::sync::Arc;
@@ -25,13 +26,18 @@ fn encrypt_for_reader(plaintext: &[u8]) -> Vec<u8> {
     cipher.encrypt(plaintext)
 }
 
-fn make_forensics(conn_id: u64, started_at: Instant) -> RelayForensicsState {
+fn make_forensics(
+    shared: &ProxySharedState,
+    conn_id: u64,
+    started_at: Instant,
+) -> RelayForensicsState {
+    let peer_ip: std::net::IpAddr = "127.0.0.1".parse().expect("ip parse must succeed");
     RelayForensicsState {
         trace_id: 0xB200_0000 + conn_id,
         conn_id,
         user: format!("tiny-frame-debt-concurrency-user-{conn_id}"),
         peer: "127.0.0.1:50000".parse().expect("peer parse must succeed"),
-        peer_hash: hash_ip("127.0.0.1".parse().expect("ip parse must succeed")),
+        peer_hash: super::hash_ip(shared, peer_ip),
         started_at,
         bytes_c2me: 0,
         bytes_me2c: Arc::new(AtomicU64::new(0)),
@@ -55,6 +61,7 @@ async fn read_once(
     forensics: &RelayForensicsState,
     frame_counter: &mut u64,
     idle_state: &mut RelayClientIdleState,
+    proxy_shared: &ProxySharedState,
 ) -> Result<Option<(PooledBuffer, bool)>> {
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
@@ -72,6 +79,7 @@ async fn read_once(
         idle_state,
         &last_downstream_activity_ms,
         forensics.started_at,
+        proxy_shared,
     )
     .await
 }
@@ -82,10 +90,11 @@ async fn stress_parallel_pure_tiny_floods_all_fail_closed() {
 
     for idx in 0..32u64 {
         set.spawn(async move {
+            let proxy_shared = ProxySharedState::new();
             let (reader, mut writer) = duplex(4096);
             let mut crypto_reader = make_crypto_reader(reader);
             let started = Instant::now();
-            let forensics = make_forensics(1000 + idx, started);
+            let forensics = make_forensics(proxy_shared.as_ref(), 1000 + idx, started);
             let mut frame_counter = 0u64;
             let mut idle_state = RelayClientIdleState::new(started);
 
@@ -102,6 +111,7 @@ async fn stress_parallel_pure_tiny_floods_all_fail_closed() {
                     &forensics,
                     &mut frame_counter,
                     &mut idle_state,
+                    proxy_shared.as_ref(),
                 ),
             )
             .await;
@@ -122,10 +132,11 @@ async fn stress_parallel_benign_tiny_burst_then_real_all_pass() {
 
     for idx in 0..24u64 {
         set.spawn(async move {
+            let proxy_shared = ProxySharedState::new();
             let (reader, mut writer) = duplex(2048);
             let mut crypto_reader = make_crypto_reader(reader);
             let started = Instant::now();
-            let forensics = make_forensics(2000 + idx, started);
+            let forensics = make_forensics(proxy_shared.as_ref(), 2000 + idx, started);
             let mut frame_counter = 0u64;
             let mut idle_state = RelayClientIdleState::new(started);
 
@@ -147,6 +158,7 @@ async fn stress_parallel_benign_tiny_burst_then_real_all_pass() {
                     &forensics,
                     &mut frame_counter,
                     &mut idle_state,
+                    proxy_shared.as_ref(),
                 ),
             )
             .await
@@ -169,10 +181,11 @@ async fn adversarial_lockstep_alternating_attack_under_jitter_closes() {
 
     for idx in 0..12u64 {
         set.spawn(async move {
+            let proxy_shared = ProxySharedState::new();
             let (reader, mut writer) = duplex(8192);
             let mut crypto_reader = make_crypto_reader(reader);
             let started = Instant::now();
-            let forensics = make_forensics(3000 + idx, started);
+            let forensics = make_forensics(proxy_shared.as_ref(), 3000 + idx, started);
             let mut frame_counter = 0u64;
             let mut idle_state = RelayClientIdleState::new(started);
 
@@ -202,6 +215,7 @@ async fn adversarial_lockstep_alternating_attack_under_jitter_closes() {
                         &forensics,
                         &mut frame_counter,
                         &mut idle_state,
+                        proxy_shared.as_ref(),
                     ),
                 )
                 .await;
@@ -235,10 +249,11 @@ async fn integration_mixed_population_attackers_close_benign_survive() {
 
     for idx in 0..20u64 {
         set.spawn(async move {
+            let proxy_shared = ProxySharedState::new();
             let (reader, mut writer) = duplex(4096);
             let mut crypto_reader = make_crypto_reader(reader);
             let started = Instant::now();
-            let forensics = make_forensics(4000 + idx, started);
+            let forensics = make_forensics(proxy_shared.as_ref(), 4000 + idx, started);
             let mut frame_counter = 0u64;
             let mut idle_state = RelayClientIdleState::new(started);
 
@@ -263,6 +278,7 @@ async fn integration_mixed_population_attackers_close_benign_survive() {
                         &forensics,
                         &mut frame_counter,
                         &mut idle_state,
+                        proxy_shared.as_ref(),
                     )
                     .await
                     {
@@ -295,6 +311,7 @@ async fn integration_mixed_population_attackers_close_benign_survive() {
                     &forensics,
                     &mut frame_counter,
                     &mut idle_state,
+                    proxy_shared.as_ref(),
                 )
                 .await
                 .expect("benign session must parse")
@@ -315,10 +332,11 @@ async fn light_fuzz_parallel_patterns_no_hang_or_panic() {
 
     for case in 0..40u64 {
         set.spawn(async move {
+            let proxy_shared = ProxySharedState::new();
             let (reader, mut writer) = duplex(8192);
             let mut crypto_reader = make_crypto_reader(reader);
             let started = Instant::now();
-            let forensics = make_forensics(5000 + case, started);
+            let forensics = make_forensics(proxy_shared.as_ref(), 5000 + case, started);
             let mut frame_counter = 0u64;
             let mut idle_state = RelayClientIdleState::new(started);
 
@@ -352,6 +370,7 @@ async fn light_fuzz_parallel_patterns_no_hang_or_panic() {
                         &forensics,
                         &mut frame_counter,
                         &mut idle_state,
+                        proxy_shared.as_ref(),
                     ),
                 )
                 .await;

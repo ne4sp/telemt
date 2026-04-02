@@ -5,7 +5,6 @@
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use std::collections::HashSet;
-use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::net::SocketAddr;
 use std::net::{IpAddr, Ipv6Addr};
@@ -23,6 +22,7 @@ use crate::protocol::constants::*;
 use crate::protocol::tls;
 use crate::stats::ReplayChecker;
 use crate::proxy::relay::DrsWriter;
+use crate::proxy::shared_state::{AuthProbeSaturationState, AuthProbeState, ProxySharedState};
 use crate::stream::{CryptoReader, CryptoWriter, FakeTlsReader, FakeTlsWriter};
 use crate::tls_front::{TlsFrontCache, emulator};
 use rand::RngExt;
@@ -55,38 +55,18 @@ const AUTH_PROBE_BACKOFF_MAX_MS: u64 = 16;
 #[cfg(not(test))]
 const AUTH_PROBE_BACKOFF_MAX_MS: u64 = 1_000;
 
-#[derive(Clone, Copy)]
-struct AuthProbeState {
-    fail_streak: u32,
-    blocked_until: Instant,
-    last_seen: Instant,
-}
-
-#[derive(Clone, Copy)]
-struct AuthProbeSaturationState {
-    fail_streak: u32,
-    blocked_until: Instant,
-    last_seen: Instant,
-}
-
-static AUTH_PROBE_STATE: OnceLock<DashMap<IpAddr, AuthProbeState>> = OnceLock::new();
-static AUTH_PROBE_SATURATION_STATE: OnceLock<Mutex<Option<AuthProbeSaturationState>>> =
-    OnceLock::new();
-static AUTH_PROBE_EVICTION_HASHER: OnceLock<RandomState> = OnceLock::new();
-
-fn auth_probe_state_map() -> &'static DashMap<IpAddr, AuthProbeState> {
-    AUTH_PROBE_STATE.get_or_init(DashMap::new)
-}
-
-fn auth_probe_saturation_state() -> &'static Mutex<Option<AuthProbeSaturationState>> {
-    AUTH_PROBE_SATURATION_STATE.get_or_init(|| Mutex::new(None))
-}
-
-fn auth_probe_saturation_state_lock()
--> std::sync::MutexGuard<'static, Option<AuthProbeSaturationState>> {
-    auth_probe_saturation_state()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn auth_probe_saturation_state_lock<'a>(
+    shared: &'a ProxySharedState,
+) -> std::sync::MutexGuard<'a, Option<AuthProbeSaturationState>> {
+    match shared.auth_probe_saturation.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = None;
+            shared.auth_probe_saturation.clear_poison();
+            guard
+        }
+    }
 }
 
 fn unknown_sni_warn_state_lock() -> std::sync::MutexGuard<'static, Option<Instant>> {
@@ -134,15 +114,15 @@ fn auth_probe_state_expired(state: &AuthProbeState, now: Instant) -> bool {
     now.duration_since(state.last_seen) > retention
 }
 
-fn auth_probe_eviction_offset(peer_ip: IpAddr, now: Instant) -> usize {
-    let hasher_state = AUTH_PROBE_EVICTION_HASHER.get_or_init(RandomState::new);
-    let mut hasher = hasher_state.build_hasher();
+fn auth_probe_eviction_offset(shared: &ProxySharedState, peer_ip: IpAddr, now: Instant) -> usize {
+    let mut hasher = shared.auth_probe_eviction_hasher.build_hasher();
     peer_ip.hash(&mut hasher);
     now.hash(&mut hasher);
     hasher.finish() as usize
 }
 
 fn auth_probe_scan_start_offset(
+    shared: &ProxySharedState,
     peer_ip: IpAddr,
     now: Instant,
     state_len: usize,
@@ -152,12 +132,12 @@ fn auth_probe_scan_start_offset(
         return 0;
     }
 
-    auth_probe_eviction_offset(peer_ip, now) % state_len
+    auth_probe_eviction_offset(shared, peer_ip, now) % state_len
 }
 
-fn auth_probe_is_throttled(peer_ip: IpAddr, now: Instant) -> bool {
+fn auth_probe_is_throttled(shared: &ProxySharedState, peer_ip: IpAddr, now: Instant) -> bool {
     let peer_ip = normalize_auth_probe_ip(peer_ip);
-    let state = auth_probe_state_map();
+    let state = &shared.auth_probe;
     let Some(entry) = state.get(&peer_ip) else {
         return false;
     };
@@ -169,9 +149,13 @@ fn auth_probe_is_throttled(peer_ip: IpAddr, now: Instant) -> bool {
     now < entry.blocked_until
 }
 
-fn auth_probe_saturation_grace_exhausted(peer_ip: IpAddr, now: Instant) -> bool {
+fn auth_probe_saturation_grace_exhausted(
+    shared: &ProxySharedState,
+    peer_ip: IpAddr,
+    now: Instant,
+) -> bool {
     let peer_ip = normalize_auth_probe_ip(peer_ip);
-    let state = auth_probe_state_map();
+    let state = &shared.auth_probe;
     let Some(entry) = state.get(&peer_ip) else {
         return false;
     };
@@ -184,20 +168,24 @@ fn auth_probe_saturation_grace_exhausted(peer_ip: IpAddr, now: Instant) -> bool 
     entry.fail_streak >= AUTH_PROBE_BACKOFF_START_FAILS + AUTH_PROBE_SATURATION_GRACE_FAILS
 }
 
-fn auth_probe_should_apply_preauth_throttle(peer_ip: IpAddr, now: Instant) -> bool {
-    if !auth_probe_is_throttled(peer_ip, now) {
+fn auth_probe_should_apply_preauth_throttle(
+    shared: &ProxySharedState,
+    peer_ip: IpAddr,
+    now: Instant,
+) -> bool {
+    if !auth_probe_is_throttled(shared, peer_ip, now) {
         return false;
     }
 
-    if !auth_probe_saturation_is_throttled(now) {
+    if !auth_probe_saturation_is_throttled(shared, now) {
         return true;
     }
 
-    auth_probe_saturation_grace_exhausted(peer_ip, now)
+    auth_probe_saturation_grace_exhausted(shared, peer_ip, now)
 }
 
-fn auth_probe_saturation_is_throttled(now: Instant) -> bool {
-    let mut guard = auth_probe_saturation_state_lock();
+fn auth_probe_saturation_is_throttled(shared: &ProxySharedState, now: Instant) -> bool {
+    let mut guard = auth_probe_saturation_state_lock(shared);
 
     let Some(state) = guard.as_mut() else {
         return false;
@@ -215,8 +203,8 @@ fn auth_probe_saturation_is_throttled(now: Instant) -> bool {
     false
 }
 
-fn auth_probe_note_saturation(now: Instant) {
-    let mut guard = auth_probe_saturation_state_lock();
+fn auth_probe_note_saturation(shared: &ProxySharedState, now: Instant) {
+    let mut guard = auth_probe_saturation_state_lock(shared);
 
     match guard.as_mut() {
         Some(state)
@@ -238,17 +226,17 @@ fn auth_probe_note_saturation(now: Instant) {
     }
 }
 
-fn auth_probe_record_failure(peer_ip: IpAddr, now: Instant) {
+fn auth_probe_record_failure(shared: &ProxySharedState, peer_ip: IpAddr, now: Instant) {
     let peer_ip = normalize_auth_probe_ip(peer_ip);
-    let state = auth_probe_state_map();
-    auth_probe_record_failure_with_state(state, peer_ip, now);
+    auth_probe_record_failure_with_state(shared, peer_ip, now);
 }
 
 fn auth_probe_record_failure_with_state(
-    state: &DashMap<IpAddr, AuthProbeState>,
+    shared: &ProxySharedState,
     peer_ip: IpAddr,
     now: Instant,
 ) {
+    let state = &shared.auth_probe;
     let make_new_state = || AuthProbeState {
         fail_streak: 1,
         blocked_until: now + auth_probe_backoff(1),
@@ -278,7 +266,7 @@ fn auth_probe_record_failure_with_state(
         while state.len() >= AUTH_PROBE_TRACK_MAX_ENTRIES {
             rounds += 1;
             if rounds > 8 {
-                auth_probe_note_saturation(now);
+                auth_probe_note_saturation(shared, now);
                 let mut eviction_candidate: Option<(IpAddr, u32, Instant)> = None;
                 for entry in state.iter().take(AUTH_PROBE_PRUNE_SCAN_LIMIT) {
                     let key = *entry.key();
@@ -321,7 +309,7 @@ fn auth_probe_record_failure_with_state(
                 }
             } else {
                 let start_offset =
-                    auth_probe_scan_start_offset(peer_ip, now, state_len, scan_limit);
+                    auth_probe_scan_start_offset(shared, peer_ip, now, state_len, scan_limit);
                 let mut scanned = 0usize;
                 for entry in state.iter().skip(start_offset) {
                     let key = *entry.key();
@@ -370,11 +358,11 @@ fn auth_probe_record_failure_with_state(
             }
 
             let Some((evict_key, _, _)) = eviction_candidate else {
-                auth_probe_note_saturation(now);
+                auth_probe_note_saturation(shared, now);
                 return;
             };
             state.remove(&evict_key);
-            auth_probe_note_saturation(now);
+            auth_probe_note_saturation(shared, now);
         }
     }
 
@@ -388,49 +376,9 @@ fn auth_probe_record_failure_with_state(
     }
 }
 
-fn auth_probe_record_success(peer_ip: IpAddr) {
+fn auth_probe_record_success(shared: &ProxySharedState, peer_ip: IpAddr) {
     let peer_ip = normalize_auth_probe_ip(peer_ip);
-    let state = auth_probe_state_map();
-    state.remove(&peer_ip);
-}
-
-#[cfg(test)]
-fn clear_auth_probe_state_for_testing() {
-    if let Some(state) = AUTH_PROBE_STATE.get() {
-        state.clear();
-    }
-    if AUTH_PROBE_SATURATION_STATE.get().is_some() {
-        let mut guard = auth_probe_saturation_state_lock();
-        *guard = None;
-    }
-}
-
-#[cfg(test)]
-fn auth_probe_fail_streak_for_testing(peer_ip: IpAddr) -> Option<u32> {
-    let peer_ip = normalize_auth_probe_ip(peer_ip);
-    let state = AUTH_PROBE_STATE.get()?;
-    state.get(&peer_ip).map(|entry| entry.fail_streak)
-}
-
-#[cfg(test)]
-fn auth_probe_is_throttled_for_testing(peer_ip: IpAddr) -> bool {
-    auth_probe_is_throttled(peer_ip, Instant::now())
-}
-
-#[cfg(test)]
-fn auth_probe_saturation_is_throttled_for_testing() -> bool {
-    auth_probe_saturation_is_throttled(Instant::now())
-}
-
-#[cfg(test)]
-fn auth_probe_saturation_is_throttled_at_for_testing(now: Instant) -> bool {
-    auth_probe_saturation_is_throttled(now)
-}
-
-#[cfg(test)]
-fn auth_probe_test_lock() -> &'static Mutex<()> {
-    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    TEST_LOCK.get_or_init(|| Mutex::new(()))
+    shared.auth_probe.remove(&peer_ip);
 }
 
 #[cfg(test)]
@@ -643,6 +591,7 @@ pub async fn handle_tls_handshake<R, W>(
     peer: SocketAddr,
     config: &ProxyConfig,
     replay_checker: &ReplayChecker,
+    proxy_shared: &ProxySharedState,
     rng: &SecureRandom,
     tls_cache: Option<Arc<TlsFrontCache>>,
 ) -> HandshakeResult<(FakeTlsReader<R>, FakeTlsWriter<W>, String), R, W>
@@ -653,14 +602,14 @@ where
     debug!(peer = %peer, handshake_len = handshake.len(), "Processing TLS handshake");
 
     let throttle_now = Instant::now();
-    if auth_probe_should_apply_preauth_throttle(peer.ip(), throttle_now) {
+    if auth_probe_should_apply_preauth_throttle(proxy_shared, peer.ip(), throttle_now) {
         maybe_apply_server_hello_delay(config).await;
         debug!(peer = %peer, "TLS handshake rejected by pre-auth probe throttle");
         return HandshakeResult::BadClient { reader, writer };
     }
 
     if handshake.len() < tls::TLS_DIGEST_POS + tls::TLS_DIGEST_LEN + 1 {
-        auth_probe_record_failure(peer.ip(), Instant::now());
+        auth_probe_record_failure(proxy_shared, peer.ip(), Instant::now());
         maybe_apply_server_hello_delay(config).await;
         debug!(peer = %peer, "TLS handshake too short");
         return HandshakeResult::BadClient { reader, writer };
@@ -696,7 +645,7 @@ where
     };
 
     if client_sni.is_some() && matched_tls_domain.is_none() && preferred_user_hint.is_none() {
-        auth_probe_record_failure(peer.ip(), Instant::now());
+        auth_probe_record_failure(proxy_shared, peer.ip(), Instant::now());
         maybe_apply_server_hello_delay(config).await;
         let sni = client_sni.as_deref().unwrap_or_default();
         let log_now = Instant::now();
@@ -733,7 +682,7 @@ where
     ) {
         Some(v) => v,
         None => {
-            auth_probe_record_failure(peer.ip(), Instant::now());
+            auth_probe_record_failure(proxy_shared, peer.ip(), Instant::now());
             maybe_apply_server_hello_delay(config).await;
             debug!(
                 peer = %peer,
@@ -747,7 +696,7 @@ where
     // Reject known replay digests before expensive cache/domain/ALPN policy work.
     let digest_half = &validation.digest[..tls::TLS_DIGEST_HALF_LEN];
     if replay_checker.check_tls_digest(digest_half) {
-        auth_probe_record_failure(peer.ip(), Instant::now());
+        auth_probe_record_failure(proxy_shared, peer.ip(), Instant::now());
         maybe_apply_server_hello_delay(config).await;
         warn!(peer = %peer, "TLS replay attack detected (duplicate digest)");
         return HandshakeResult::BadClient { reader, writer };
@@ -828,7 +777,7 @@ where
         "TLS handshake successful"
     );
 
-    auth_probe_record_success(peer.ip());
+    auth_probe_record_success(proxy_shared, peer.ip());
 
     HandshakeResult::Success((
         FakeTlsReader::new(reader),
@@ -845,6 +794,7 @@ pub async fn handle_mtproto_handshake<R, W>(
     peer: SocketAddr,
     config: &ProxyConfig,
     replay_checker: &ReplayChecker,
+    proxy_shared: &ProxySharedState,
     is_tls: bool,
     preferred_user: Option<&str>,
 ) -> HandshakeResult<(CryptoReader<R>, CryptoWriter<DrsWriter<W>>, HandshakeSuccess), R, W>
@@ -863,7 +813,7 @@ where
     );
 
     let throttle_now = Instant::now();
-    if auth_probe_should_apply_preauth_throttle(peer.ip(), throttle_now) {
+    if auth_probe_should_apply_preauth_throttle(proxy_shared, peer.ip(), throttle_now) {
         maybe_apply_server_hello_delay(config).await;
         debug!(peer = %peer, "MTProto handshake rejected by pre-auth probe throttle");
         return HandshakeResult::BadClient { reader, writer };
@@ -933,7 +883,7 @@ where
         // entry from the cache. We accept the cost of performing the full
         // authentication check first to avoid poisoning the replay cache.
         if replay_checker.check_and_add_handshake(dec_prekey_iv) {
-            auth_probe_record_failure(peer.ip(), Instant::now());
+            auth_probe_record_failure(proxy_shared, peer.ip(), Instant::now());
             maybe_apply_server_hello_delay(config).await;
             warn!(peer = %peer, user = %user, "MTProto replay attack detected");
             return HandshakeResult::BadClient { reader, writer };
@@ -960,7 +910,7 @@ where
             "MTProto handshake successful"
         );
 
-        auth_probe_record_success(peer.ip());
+        auth_probe_record_success(proxy_shared, peer.ip());
 
         let max_pending = config.general.crypto_pending_buffer;
         let writer = DrsWriter::new(
@@ -974,7 +924,7 @@ where
         ));
     }
 
-    auth_probe_record_failure(peer.ip(), Instant::now());
+    auth_probe_record_failure(proxy_shared, peer.ip(), Instant::now());
     maybe_apply_server_hello_delay(config).await;
     debug!(peer = %peer, "MTProto handshake: no matching user found");
     HandshakeResult::BadClient { reader, writer }

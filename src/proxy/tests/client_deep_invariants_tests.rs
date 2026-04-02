@@ -6,6 +6,7 @@ use crate::transport::UpstreamManager;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncWriteExt, duplex};
+use crate::proxy::ProxySharedState;
 
 fn preload_user_quota(stats: &Stats, user: &str, bytes: u64) {
     let user_stats = stats.get_or_create_user_stats_handle(user);
@@ -33,6 +34,8 @@ fn invariant_wrap_tls_application_record_exact_multiples() {
 
 #[tokio::test]
 async fn invariant_tls_clienthello_truncation_exact_boundary_triggers_masking() {
+    let proxy_shared = ProxySharedState::new();
+
     let config = Arc::new(ProxyConfig::default());
     let stats = Arc::new(Stats::new());
 
@@ -60,6 +63,7 @@ async fn invariant_tls_clienthello_truncation_exact_boundary_triggers_masking() 
         None,
         Arc::new(UserIpTracker::new()),
         Arc::new(BeobachtenStore::new()),
+        ProxySharedState::new(),
         false,
     ));
 
@@ -159,6 +163,8 @@ async fn invariant_quota_exact_boundary_inclusive() {
 
 #[tokio::test]
 async fn invariant_direct_mode_partial_header_eof_is_error_not_bad_connect() {
+    let proxy_shared = ProxySharedState::new();
+
     let mut cfg = ProxyConfig::default();
     cfg.general.beobachten = true;
     cfg.general.beobachten_minutes = 1;
@@ -191,6 +197,7 @@ async fn invariant_direct_mode_partial_header_eof_is_error_not_bad_connect() {
         None,
         Arc::new(UserIpTracker::new()),
         beobachten.clone(),
+        proxy_shared.clone(),
         false,
     ));
 

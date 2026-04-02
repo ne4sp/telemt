@@ -1,14 +1,15 @@
 use super::*;
+use crate::proxy::ProxySharedState;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::Ordering;
 
 #[test]
 fn blackhat_registry_poison_recovers_with_fail_closed_reset_and_pressure_accounting() {
-    let _guard = relay_idle_pressure_test_scope();
-    clear_relay_idle_pressure_state_for_testing();
+    let shared = ProxySharedState::new();
 
     let _ = catch_unwind(AssertUnwindSafe(|| {
-        let registry = relay_idle_candidate_registry();
-        let mut guard = registry
+        let mut guard = shared
+            .relay_idle_registry
             .lock()
             .expect("registry lock must be acquired before poison");
         guard.by_conn_id.insert(
@@ -23,40 +24,39 @@ fn blackhat_registry_poison_recovers_with_fail_closed_reset_and_pressure_account
     }));
 
     // Helper lock must recover from poison, reset stale state, and continue.
-    assert!(mark_relay_idle_candidate(42));
-    assert_eq!(oldest_relay_idle_candidate(), Some(42));
+    assert!(super::mark_relay_idle_candidate(shared.as_ref(), 42));
+    assert_eq!(super::oldest_relay_idle_candidate(shared.as_ref()), Some(42));
 
-    let before = relay_pressure_event_seq();
-    note_relay_pressure_event();
-    let after = relay_pressure_event_seq();
+    let before = super::relay_pressure_event_seq(shared.as_ref());
+    super::note_relay_pressure_event(shared.as_ref());
+    let after = super::relay_pressure_event_seq(shared.as_ref());
     assert!(
         after > before,
         "pressure accounting must still advance after poison"
     );
-
-    clear_relay_idle_pressure_state_for_testing();
 }
 
 #[test]
 fn clear_state_helper_must_reset_poisoned_registry_for_deterministic_fifo_tests() {
-    let _guard = relay_idle_pressure_test_scope();
-    clear_relay_idle_pressure_state_for_testing();
+    let shared = ProxySharedState::new();
 
     let _ = catch_unwind(AssertUnwindSafe(|| {
-        let registry = relay_idle_candidate_registry();
-        let _guard = registry
+        let _guard = shared
+            .relay_idle_registry
             .lock()
             .expect("registry lock must be acquired before poison");
         panic!("intentional poison while lock held");
     }));
 
-    clear_relay_idle_pressure_state_for_testing();
+    {
+        let mut guard = super::relay_idle_candidate_registry_lock(shared.as_ref());
+        *guard = Default::default();
+    }
+    shared.relay_idle_mark_seq.store(0, Ordering::Relaxed);
 
-    assert_eq!(oldest_relay_idle_candidate(), None);
-    assert_eq!(relay_pressure_event_seq(), 0);
+    assert_eq!(super::oldest_relay_idle_candidate(shared.as_ref()), None);
+    assert_eq!(super::relay_pressure_event_seq(shared.as_ref()), 0);
 
-    assert!(mark_relay_idle_candidate(7));
-    assert_eq!(oldest_relay_idle_candidate(), Some(7));
-
-    clear_relay_idle_pressure_state_for_testing();
+    assert!(super::mark_relay_idle_candidate(shared.as_ref(), 7));
+    assert_eq!(super::oldest_relay_idle_candidate(shared.as_ref()), Some(7));
 }

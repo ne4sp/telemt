@@ -3,14 +3,13 @@
 //! For TLS sessions, ciphertext chunking before FakeTLS framing is configured at
 //! handshake via `DrsWriter` in `proxy::relay` (`censorship.tls_relay_dynamic_record_sizing`).
 
-use std::collections::hash_map::RandomState;
 use std::collections::{BTreeSet, HashMap};
 #[cfg(test)]
 use std::future::Future;
 use std::hash::{BuildHasher, Hash};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
@@ -24,6 +23,9 @@ use crate::crypto::SecureRandom;
 use crate::error::{ProxyError, Result};
 use crate::protocol::constants::{secure_padding_len, *};
 use crate::proxy::handshake::HandshakeSuccess;
+use crate::proxy::shared_state::{
+    DesyncDedupRotationState, ProxySharedState, RelayIdleCandidateMeta, RelayIdleCandidateRegistry,
+};
 use crate::proxy::route_mode::{
     ROUTE_SWITCH_ERROR_MSG, RelayRouteMode, RouteCutoverState, affected_cutover_state,
     cutover_stagger_delay,
@@ -56,22 +58,6 @@ const ME_D2C_FLUSH_BATCH_MAX_BYTES_MIN: usize = 4096;
 const ME_D2C_FRAME_BUF_SHRINK_HYSTERESIS_FACTOR: usize = 2;
 const ME_D2C_SINGLE_WRITE_COALESCE_MAX_BYTES: usize = 128 * 1024;
 const QUOTA_RESERVE_SPIN_RETRIES: usize = 32;
-static DESYNC_DEDUP: OnceLock<DashMap<u64, Instant>> = OnceLock::new();
-static DESYNC_DEDUP_PREVIOUS: OnceLock<DashMap<u64, Instant>> = OnceLock::new();
-static DESYNC_HASHER: OnceLock<RandomState> = OnceLock::new();
-static DESYNC_FULL_CACHE_LAST_EMIT_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-static DESYNC_DEDUP_ROTATION_STATE: OnceLock<Mutex<DesyncDedupRotationState>> = OnceLock::new();
-// Invariant for async callers:
-// this std::sync::Mutex is allowed only because critical sections are short,
-// synchronous, and MUST never cross an `.await`.
-static RELAY_IDLE_CANDIDATE_REGISTRY: OnceLock<Mutex<RelayIdleCandidateRegistry>> = OnceLock::new();
-static RELAY_IDLE_MARK_SEQ: AtomicU64 = AtomicU64::new(0);
-
-#[derive(Default)]
-struct DesyncDedupRotationState {
-    current_started_at: Option<Instant>,
-}
-
 struct RelayForensicsState {
     trace_id: u64,
     conn_id: u64,
@@ -84,49 +70,29 @@ struct RelayForensicsState {
     desync_all_full: bool,
 }
 
-#[derive(Default)]
-struct RelayIdleCandidateRegistry {
-    by_conn_id: HashMap<u64, RelayIdleCandidateMeta>,
-    ordered: BTreeSet<(u64, u64)>,
-    pressure_event_seq: u64,
-    pressure_consumed_seq: u64,
-}
-
-#[derive(Clone, Copy)]
-struct RelayIdleCandidateMeta {
-    mark_order_seq: u64,
-    mark_pressure_seq: u64,
-}
-
-fn relay_idle_candidate_registry() -> &'static Mutex<RelayIdleCandidateRegistry> {
-    RELAY_IDLE_CANDIDATE_REGISTRY.get_or_init(|| Mutex::new(RelayIdleCandidateRegistry::default()))
-}
-
-fn relay_idle_candidate_registry_lock() -> std::sync::MutexGuard<'static, RelayIdleCandidateRegistry>
-{
-    // Keep lock scope narrow and synchronous: callers must drop guard before any `.await`.
-    let registry = relay_idle_candidate_registry();
-    match registry.lock() {
+fn relay_idle_candidate_registry_lock<'a>(
+    shared: &'a ProxySharedState,
+) -> std::sync::MutexGuard<'a, RelayIdleCandidateRegistry> {
+    match shared.relay_idle_registry.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
             let mut guard = poisoned.into_inner();
-            // Fail closed after panic while holding registry lock: drop all
-            // candidates and pressure cursors to avoid stale cross-session state.
             *guard = RelayIdleCandidateRegistry::default();
-            registry.clear_poison();
+            shared.relay_idle_registry.clear_poison();
             guard
         }
     }
 }
 
-fn mark_relay_idle_candidate(conn_id: u64) -> bool {
-    let mut guard = relay_idle_candidate_registry_lock();
+fn mark_relay_idle_candidate(shared: &ProxySharedState, conn_id: u64) -> bool {
+    let mut guard = relay_idle_candidate_registry_lock(shared);
 
     if guard.by_conn_id.contains_key(&conn_id) {
         return false;
     }
 
-    let mark_order_seq = RELAY_IDLE_MARK_SEQ
+    let mark_order_seq = shared
+        .relay_idle_mark_seq
         .fetch_add(1, Ordering::Relaxed)
         .saturating_add(1);
     let meta = RelayIdleCandidateMeta {
@@ -138,8 +104,8 @@ fn mark_relay_idle_candidate(conn_id: u64) -> bool {
     true
 }
 
-fn clear_relay_idle_candidate(conn_id: u64) {
-    let mut guard = relay_idle_candidate_registry_lock();
+fn clear_relay_idle_candidate(shared: &ProxySharedState, conn_id: u64) {
+    let mut guard = relay_idle_candidate_registry_lock(shared);
 
     if let Some(meta) = guard.by_conn_id.remove(&conn_id) {
         guard.ordered.remove(&(meta.mark_order_seq, conn_id));
@@ -147,27 +113,28 @@ fn clear_relay_idle_candidate(conn_id: u64) {
 }
 
 #[cfg(test)]
-fn oldest_relay_idle_candidate() -> Option<u64> {
-    let guard = relay_idle_candidate_registry_lock();
+pub(crate) fn oldest_relay_idle_candidate(shared: &ProxySharedState) -> Option<u64> {
+    let guard = relay_idle_candidate_registry_lock(shared);
     guard.ordered.iter().next().map(|(_, conn_id)| *conn_id)
 }
 
-fn note_relay_pressure_event() {
-    let mut guard = relay_idle_candidate_registry_lock();
+fn note_relay_pressure_event(shared: &ProxySharedState) {
+    let mut guard = relay_idle_candidate_registry_lock(shared);
     guard.pressure_event_seq = guard.pressure_event_seq.wrapping_add(1);
 }
 
-fn relay_pressure_event_seq() -> u64 {
-    let guard = relay_idle_candidate_registry_lock();
+fn relay_pressure_event_seq(shared: &ProxySharedState) -> u64 {
+    let guard = relay_idle_candidate_registry_lock(shared);
     guard.pressure_event_seq
 }
 
 fn maybe_evict_idle_candidate_on_pressure(
+    shared: &ProxySharedState,
     conn_id: u64,
     seen_pressure_seq: &mut u64,
     stats: &Stats,
 ) -> bool {
-    let mut guard = relay_idle_candidate_registry_lock();
+    let mut guard = relay_idle_candidate_registry_lock(shared);
 
     let latest_pressure_seq = guard.pressure_event_seq;
     if latest_pressure_seq == *seen_pressure_seq {
@@ -208,15 +175,6 @@ fn maybe_evict_idle_candidate_on_pressure(
     guard.pressure_consumed_seq = latest_pressure_seq;
     stats.increment_relay_pressure_evict_total();
     true
-}
-
-#[cfg(test)]
-fn clear_relay_idle_pressure_state_for_testing() {
-    if RELAY_IDLE_CANDIDATE_REGISTRY.get().is_some() {
-        let mut guard = relay_idle_candidate_registry_lock();
-        *guard = RelayIdleCandidateRegistry::default();
-    }
-    RELAY_IDLE_MARK_SEQ.store(0, Ordering::Relaxed);
 }
 
 #[derive(Clone, Copy)]
@@ -308,31 +266,34 @@ impl MeD2cFlushPolicy {
     }
 }
 
-fn hash_value<T: Hash>(value: &T) -> u64 {
-    let state = DESYNC_HASHER.get_or_init(RandomState::new);
-    state.hash_one(value)
+fn hash_value<T: Hash>(shared: &ProxySharedState, value: &T) -> u64 {
+    shared.desync_hasher.hash_one(value)
 }
 
-fn hash_ip(ip: IpAddr) -> u64 {
-    hash_value(&ip)
+fn hash_ip(shared: &ProxySharedState, ip: IpAddr) -> u64 {
+    hash_value(shared, &ip)
 }
 
-fn should_emit_full_desync(key: u64, all_full: bool, now: Instant) -> bool {
+fn should_emit_full_desync(
+    shared: &ProxySharedState,
+    key: u64,
+    all_full: bool,
+    now: Instant,
+) -> bool {
     if all_full {
         return true;
     }
 
-    let dedup_current = DESYNC_DEDUP.get_or_init(DashMap::new);
-    let dedup_previous = DESYNC_DEDUP_PREVIOUS.get_or_init(DashMap::new);
-    let rotation_state =
-        DESYNC_DEDUP_ROTATION_STATE.get_or_init(|| Mutex::new(DesyncDedupRotationState::default()));
+    let dedup_current = &shared.desync_dedup;
+    let dedup_previous = &shared.desync_dedup_previous;
+    let rotation_state = &shared.desync_dedup_rotation_state;
 
     let mut state = match rotation_state.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
             let mut guard = poisoned.into_inner();
             *guard = DesyncDedupRotationState::default();
-            rotation_state.clear_poison();
+            shared.desync_dedup_rotation_state.clear_poison();
             guard
         }
     };
@@ -389,16 +350,15 @@ fn should_emit_full_desync(key: u64, all_full: bool, now: Instant) -> bool {
         dedup_current.clear();
         state.current_started_at = Some(now);
         dedup_current.insert(key, now);
-        should_emit_full_desync_full_cache(now)
+        should_emit_full_desync_full_cache(shared, now)
     } else {
         dedup_current.insert(key, now);
         true
     }
 }
 
-fn should_emit_full_desync_full_cache(now: Instant) -> bool {
-    let gate = DESYNC_FULL_CACHE_LAST_EMIT_AT.get_or_init(|| Mutex::new(None));
-    let Ok(mut last_emit_at) = gate.lock() else {
+fn should_emit_full_desync_full_cache(shared: &ProxySharedState, now: Instant) -> bool {
+    let Ok(mut last_emit_at) = shared.desync_full_cache_last_emit_at.lock() else {
         return false;
     };
 
@@ -422,46 +382,6 @@ fn should_emit_full_desync_full_cache(now: Instant) -> bool {
     }
 }
 
-#[cfg(test)]
-fn clear_desync_dedup_for_testing() {
-    if let Some(dedup) = DESYNC_DEDUP.get() {
-        dedup.clear();
-    }
-    if let Some(dedup_previous) = DESYNC_DEDUP_PREVIOUS.get() {
-        dedup_previous.clear();
-    }
-    if let Some(rotation_state) = DESYNC_DEDUP_ROTATION_STATE.get() {
-        match rotation_state.lock() {
-            Ok(mut guard) => {
-                *guard = DesyncDedupRotationState::default();
-            }
-            Err(poisoned) => {
-                let mut guard = poisoned.into_inner();
-                *guard = DesyncDedupRotationState::default();
-                rotation_state.clear_poison();
-            }
-        }
-    }
-    if let Some(last_emit_at) = DESYNC_FULL_CACHE_LAST_EMIT_AT.get() {
-        match last_emit_at.lock() {
-            Ok(mut guard) => {
-                *guard = None;
-            }
-            Err(poisoned) => {
-                let mut guard = poisoned.into_inner();
-                *guard = None;
-                last_emit_at.clear_poison();
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-fn desync_dedup_test_lock() -> &'static Mutex<()> {
-    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    TEST_LOCK.get_or_init(|| Mutex::new(()))
-}
-
 fn desync_forensics_len_bytes(len: usize) -> ([u8; 4], bool) {
     match u32::try_from(len) {
         Ok(value) => (value.to_le_bytes(), false),
@@ -470,6 +390,7 @@ fn desync_forensics_len_bytes(len: usize) -> ([u8; 4], bool) {
 }
 
 fn report_desync_frame_too_large(
+    shared: &ProxySharedState,
     state: &RelayForensicsState,
     proto_tag: ProtoTag,
     frame_counter: u64,
@@ -487,13 +408,13 @@ fn report_desync_frame_too_large(
         .map(|b| matches!(b[0], b'G' | b'P' | b'H' | b'C' | b'D'))
         .unwrap_or(false);
     let now = Instant::now();
-    let dedup_key = hash_value(&(
+    let dedup_key = hash_value(shared, &(
         state.user.as_str(),
         state.peer_hash,
         proto_tag,
         DESYNC_ERROR_CLASS,
     ));
-    let emit_full = should_emit_full_desync(dedup_key, state.desync_all_full, now);
+    let emit_full = should_emit_full_desync(shared, dedup_key, state.desync_all_full, now);
     let duration_ms = state.started_at.elapsed().as_millis() as u64;
     let bytes_me2c = state.bytes_me2c.load(Ordering::Relaxed);
 
@@ -633,20 +554,8 @@ fn observe_me_d2c_flush_event(
     }
 }
 
-#[cfg(test)]
-fn relay_idle_pressure_test_guard() -> &'static Mutex<()> {
-    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    TEST_LOCK.get_or_init(|| Mutex::new(()))
-}
-
-#[cfg(test)]
-pub(crate) fn relay_idle_pressure_test_scope() -> std::sync::MutexGuard<'static, ()> {
-    relay_idle_pressure_test_guard()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 async fn enqueue_c2me_command(
+    proxy_shared: &ProxySharedState,
     tx: &mpsc::Sender<C2MeCommand>,
     cmd: C2MeCommand,
     send_timeout: Option<Duration>,
@@ -655,7 +564,7 @@ async fn enqueue_c2me_command(
         Ok(()) => Ok(()),
         Err(mpsc::error::TrySendError::Closed(cmd)) => Err(mpsc::error::SendError(cmd)),
         Err(mpsc::error::TrySendError::Full(cmd)) => {
-            note_relay_pressure_event();
+            note_relay_pressure_event(proxy_shared);
             // Cooperative yield reduces burst catch-up when the per-conn queue is near saturation.
             if tx.capacity() <= C2ME_SOFT_PRESSURE_MIN_FREE_SLOTS {
                 tokio::task::yield_now().await;
@@ -698,6 +607,7 @@ pub(crate) async fn handle_via_middle_proxy<R, W>(
     buffer_pool: Arc<BufferPool>,
     local_addr: SocketAddr,
     rng: Arc<SecureRandom>,
+    proxy_shared: Arc<ProxySharedState>,
     mut route_rx: watch::Receiver<RouteCutoverState>,
     route_snapshot: RouteCutoverState,
     session_id: u64,
@@ -731,7 +641,7 @@ where
         conn_id,
         user: user.clone(),
         peer,
-        peer_hash: hash_ip(peer.ip()),
+        peer_hash: hash_ip(proxy_shared.as_ref(), peer.ip()),
         started_at: Instant::now(),
         bytes_c2me: 0,
         bytes_me2c: bytes_me2c.clone(),
@@ -1162,10 +1072,11 @@ where
     let mut client_closed = false;
     let mut frame_counter: u64 = 0;
     let mut route_watch_open = true;
-    let mut seen_pressure_seq = relay_pressure_event_seq();
+    let mut seen_pressure_seq = relay_pressure_event_seq(proxy_shared.as_ref());
     loop {
         if relay_idle_policy.enabled
             && maybe_evict_idle_candidate_on_pressure(
+                proxy_shared.as_ref(),
                 conn_id,
                 &mut seen_pressure_seq,
                 stats.as_ref(),
@@ -1177,7 +1088,7 @@ where
                 user = %user,
                 "Middle-relay pressure eviction for idle-candidate session"
             );
-            let _ = enqueue_c2me_command(&c2me_tx, C2MeCommand::Close, c2me_send_timeout).await;
+            let _ = enqueue_c2me_command(proxy_shared.as_ref(), &c2me_tx, C2MeCommand::Close, c2me_send_timeout).await;
             main_result = Err(ProxyError::Proxy(
                 "middle-relay session evicted under pressure (idle-candidate)".to_string(),
             ));
@@ -1196,7 +1107,7 @@ where
                 "Cutover affected middle session, closing client connection"
             );
             tokio::time::sleep(delay).await;
-            let _ = enqueue_c2me_command(&c2me_tx, C2MeCommand::Close, c2me_send_timeout).await;
+            let _ = enqueue_c2me_command(proxy_shared.as_ref(), &c2me_tx, C2MeCommand::Close, c2me_send_timeout).await;
             main_result = Err(ProxyError::Proxy(ROUTE_SWITCH_ERROR_MSG.to_string()));
             break;
         }
@@ -1219,6 +1130,7 @@ where
                 &mut relay_idle_state,
                 last_downstream_activity_ms.as_ref(),
                 session_started_at,
+                proxy_shared.as_ref(),
             ) => {
                 match payload_result {
                     Ok(Some((payload, quickack))) => {
@@ -1255,6 +1167,7 @@ where
                         }
                         // Keep client read loop lightweight: route heavy ME send path via a dedicated task.
                         if enqueue_c2me_command(
+                            proxy_shared.as_ref(),
                             &c2me_tx,
                             C2MeCommand::Data { payload, flags },
                             c2me_send_timeout,
@@ -1270,7 +1183,7 @@ where
                         debug!(conn_id, "Client EOF");
                         client_closed = true;
                         let _ =
-                            enqueue_c2me_command(&c2me_tx, C2MeCommand::Close, c2me_send_timeout)
+                            enqueue_c2me_command(proxy_shared.as_ref(), &c2me_tx, C2MeCommand::Close, c2me_send_timeout)
                                 .await;
                         break;
                     }
@@ -1320,7 +1233,7 @@ where
         frames_ok = frame_counter,
         "ME relay cleanup"
     );
-    clear_relay_idle_candidate(conn_id);
+    clear_relay_idle_candidate(proxy_shared.as_ref(), conn_id);
     me_pool.registry().unregister(conn_id).await;
     result
 }
@@ -1337,6 +1250,7 @@ async fn read_client_payload_with_idle_policy<R>(
     idle_state: &mut RelayClientIdleState,
     last_downstream_activity_ms: &AtomicU64,
     session_started_at: Instant,
+    proxy_shared: &ProxySharedState,
 ) -> Result<Option<(PooledBuffer, bool)>>
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -1352,6 +1266,7 @@ where
         session_started_at: Instant,
         forensics: &RelayForensicsState,
         stats: &Stats,
+        proxy_shared: &ProxySharedState,
         read_label: &'static str,
     ) -> Result<()>
     where
@@ -1387,7 +1302,7 @@ where
                 let hard_deadline =
                     hard_deadline(idle_policy, idle_state, session_started_at, downstream_ms);
                 if now >= hard_deadline {
-                    clear_relay_idle_candidate(forensics.conn_id);
+                    clear_relay_idle_candidate(proxy_shared, forensics.conn_id);
                     stats.increment_relay_idle_hard_close_total();
                     let client_idle_secs = now
                         .saturating_duration_since(idle_state.last_client_frame_at)
@@ -1425,7 +1340,7 @@ where
                         >= idle_policy.soft_idle
                 {
                     idle_state.soft_idle_marked = true;
-                    if mark_relay_idle_candidate(forensics.conn_id) {
+                    if mark_relay_idle_candidate(proxy_shared, forensics.conn_id) {
                         stats.increment_relay_idle_soft_mark_total();
                     }
                     info!(
@@ -1495,6 +1410,7 @@ where
                     session_started_at,
                     forensics,
                     stats,
+                    proxy_shared,
                     "abridged.first_len_byte",
                 )
                 .await
@@ -1518,6 +1434,7 @@ where
                         session_started_at,
                         forensics,
                         stats,
+                        proxy_shared,
                         "abridged.extended_len",
                     )
                     .await?;
@@ -1542,6 +1459,7 @@ where
                     session_started_at,
                     forensics,
                     stats,
+                    proxy_shared,
                     "len_prefix",
                 )
                 .await
@@ -1599,6 +1517,7 @@ where
 
         if len > max_frame {
             return Err(report_desync_frame_too_large(
+                proxy_shared,
                 forensics,
                 proto_tag,
                 *frame_counter,
@@ -1640,6 +1559,7 @@ where
             session_started_at,
             forensics,
             stats,
+            proxy_shared,
             "payload",
         )
         .await?;
@@ -1651,7 +1571,7 @@ where
         *frame_counter += 1;
         idle_state.on_client_frame(Instant::now());
         idle_state.tiny_frame_debt = idle_state.tiny_frame_debt.saturating_sub(1);
-        clear_relay_idle_candidate(forensics.conn_id);
+        clear_relay_idle_candidate(proxy_shared, forensics.conn_id);
         return Ok(Some((payload, quickack)));
     }
 }
@@ -1674,6 +1594,7 @@ where
     let mut idle_state = RelayClientIdleState::new(now);
     let last_downstream_activity_ms = AtomicU64::new(0);
     let idle_policy = RelayClientIdlePolicy::disabled(frame_read_timeout);
+    let proxy_shared = ProxySharedState::new();
     read_client_payload_with_idle_policy(
         client_reader,
         proto_tag,
@@ -1686,6 +1607,7 @@ where
         &mut idle_state,
         &last_downstream_activity_ms,
         now,
+        proxy_shared.as_ref(),
     )
     .await
 }

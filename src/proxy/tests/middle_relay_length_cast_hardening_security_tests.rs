@@ -1,4 +1,5 @@
 use super::*;
+use crate::proxy::ProxySharedState;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
@@ -57,7 +58,9 @@ fn report_desync_frame_too_large_preserves_full_length_in_error_message() {
     };
 
     let huge_len = usize::MAX;
+    let shared = ProxySharedState::new();
     let err = report_desync_frame_too_large(
+        shared.as_ref(),
         &state,
         ProtoTag::Intermediate,
         3,

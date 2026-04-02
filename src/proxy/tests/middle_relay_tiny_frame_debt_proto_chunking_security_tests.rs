@@ -1,5 +1,6 @@
 use super::*;
 use crate::crypto::AesCtr;
+use crate::proxy::ProxySharedState;
 use crate::stats::Stats;
 use crate::stream::{BufferPool, CryptoReader, PooledBuffer};
 use std::sync::Arc;
@@ -24,13 +25,18 @@ fn encrypt_for_reader(plaintext: &[u8]) -> Vec<u8> {
     cipher.encrypt(plaintext)
 }
 
-fn make_forensics(conn_id: u64, started_at: Instant) -> RelayForensicsState {
+fn make_forensics(
+    shared: &ProxySharedState,
+    conn_id: u64,
+    started_at: Instant,
+) -> RelayForensicsState {
+    let peer_ip: std::net::IpAddr = "127.0.0.1".parse().expect("ip parse must succeed");
     RelayForensicsState {
         trace_id: 0xB300_0000 + conn_id,
         conn_id,
         user: format!("tiny-frame-debt-proto-chunk-user-{conn_id}"),
         peer: "127.0.0.1:50000".parse().expect("peer parse must succeed"),
-        peer_hash: hash_ip("127.0.0.1".parse().expect("ip parse must succeed")),
+        peer_hash: super::hash_ip(shared, peer_ip),
         started_at,
         bytes_c2me: 0,
         bytes_me2c: Arc::new(AtomicU64::new(0)),
@@ -98,6 +104,7 @@ async fn read_once_with_state(
     forensics: &RelayForensicsState,
     frame_counter: &mut u64,
     idle_state: &mut RelayClientIdleState,
+    proxy_shared: &ProxySharedState,
 ) -> Result<Option<(PooledBuffer, bool)>> {
     let buffer_pool = Arc::new(BufferPool::new());
     let stats = Stats::new();
@@ -115,6 +122,7 @@ async fn read_once_with_state(
         idle_state,
         &last_downstream_activity_ms,
         forensics.started_at,
+        proxy_shared,
     )
     .await
 }
@@ -126,10 +134,11 @@ fn is_fail_closed_outcome(result: &Result<Option<(PooledBuffer, bool)>>) -> bool
 
 #[tokio::test]
 async fn intermediate_chunked_zero_flood_fail_closed() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(4096);
     let mut crypto_reader = make_crypto_reader(reader);
     let started = Instant::now();
-    let forensics = make_forensics(6101, started);
+    let forensics = make_forensics(proxy_shared.as_ref(), 6101, started);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(started);
 
@@ -149,6 +158,7 @@ async fn intermediate_chunked_zero_flood_fail_closed() {
             &forensics,
             &mut frame_counter,
             &mut idle_state,
+            proxy_shared.as_ref(),
         ),
     )
     .await;
@@ -162,10 +172,11 @@ async fn intermediate_chunked_zero_flood_fail_closed() {
 
 #[tokio::test]
 async fn secure_chunked_zero_flood_fail_closed() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(4096);
     let mut crypto_reader = make_crypto_reader(reader);
     let started = Instant::now();
-    let forensics = make_forensics(6102, started);
+    let forensics = make_forensics(proxy_shared.as_ref(), 6102, started);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(started);
 
@@ -185,6 +196,7 @@ async fn secure_chunked_zero_flood_fail_closed() {
             &forensics,
             &mut frame_counter,
             &mut idle_state,
+            proxy_shared.as_ref(),
         ),
     )
     .await;
@@ -198,10 +210,11 @@ async fn secure_chunked_zero_flood_fail_closed() {
 
 #[tokio::test]
 async fn intermediate_chunked_alternating_attack_closes_before_eof() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(8192);
     let mut crypto_reader = make_crypto_reader(reader);
     let started = Instant::now();
-    let forensics = make_forensics(6103, started);
+    let forensics = make_forensics(proxy_shared.as_ref(), 6103, started);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(started);
 
@@ -231,6 +244,7 @@ async fn intermediate_chunked_alternating_attack_closes_before_eof() {
                 &forensics,
                 &mut frame_counter,
                 &mut idle_state,
+                proxy_shared.as_ref(),
             ),
         )
         .await;
@@ -254,10 +268,11 @@ async fn intermediate_chunked_alternating_attack_closes_before_eof() {
 
 #[tokio::test]
 async fn secure_chunked_alternating_attack_closes_before_eof() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(8192);
     let mut crypto_reader = make_crypto_reader(reader);
     let started = Instant::now();
-    let forensics = make_forensics(6104, started);
+    let forensics = make_forensics(proxy_shared.as_ref(), 6104, started);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(started);
 
@@ -283,6 +298,7 @@ async fn secure_chunked_alternating_attack_closes_before_eof() {
                 &forensics,
                 &mut frame_counter,
                 &mut idle_state,
+                proxy_shared.as_ref(),
             ),
         )
         .await;
@@ -306,10 +322,11 @@ async fn secure_chunked_alternating_attack_closes_before_eof() {
 
 #[tokio::test]
 async fn intermediate_chunked_safe_small_burst_still_returns_real_frame() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(1024);
     let mut crypto_reader = make_crypto_reader(reader);
     let started = Instant::now();
-    let forensics = make_forensics(6105, started);
+    let forensics = make_forensics(proxy_shared.as_ref(), 6105, started);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(started);
 
@@ -328,6 +345,7 @@ async fn intermediate_chunked_safe_small_burst_still_returns_real_frame() {
         &forensics,
         &mut frame_counter,
         &mut idle_state,
+        proxy_shared.as_ref(),
     )
     .await
     .expect("intermediate safe burst should parse")
@@ -339,10 +357,11 @@ async fn intermediate_chunked_safe_small_burst_still_returns_real_frame() {
 
 #[tokio::test]
 async fn secure_chunked_safe_small_burst_still_returns_real_frame() {
+    let proxy_shared = ProxySharedState::new();
     let (reader, mut writer) = duplex(1024);
     let mut crypto_reader = make_crypto_reader(reader);
     let started = Instant::now();
-    let forensics = make_forensics(6106, started);
+    let forensics = make_forensics(proxy_shared.as_ref(), 6106, started);
     let mut frame_counter = 0u64;
     let mut idle_state = RelayClientIdleState::new(started);
 
@@ -361,6 +380,7 @@ async fn secure_chunked_safe_small_burst_still_returns_real_frame() {
         &forensics,
         &mut frame_counter,
         &mut idle_state,
+        proxy_shared.as_ref(),
     )
     .await
     .expect("secure safe burst should parse")
@@ -385,10 +405,11 @@ async fn light_fuzz_proto_chunking_outcomes_are_bounded() {
             ProtoTag::Secure
         };
 
+        let proxy_shared = ProxySharedState::new();
         let (reader, mut writer) = duplex(8192);
         let mut crypto_reader = make_crypto_reader(reader);
         let started = Instant::now();
-        let forensics = make_forensics(6200 + case, started);
+        let forensics = make_forensics(proxy_shared.as_ref(), 6200 + case, started);
         let mut frame_counter = 0u64;
         let mut idle_state = RelayClientIdleState::new(started);
 
@@ -419,6 +440,7 @@ async fn light_fuzz_proto_chunking_outcomes_are_bounded() {
                     &forensics,
                     &mut frame_counter,
                     &mut idle_state,
+                    proxy_shared.as_ref(),
                 ),
             )
             .await;
