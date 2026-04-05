@@ -221,16 +221,16 @@ verify_install_deps() {
     command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || die "Neither curl nor wget is installed."
     command -v cp >/dev/null 2>&1 || command -v install >/dev/null 2>&1 || die "Need cp or install"
 
-    if ! command -v setcap >/dev/null 2>&1; then
+    if ! command -v setcap >/dev/null 2>&1 || ! command -v conntrack >/dev/null 2>&1; then
         if command -v apk >/dev/null 2>&1; then
-            $SUDO apk add --no-cache libcap-utils >/dev/null 2>&1 || $SUDO apk add --no-cache libcap >/dev/null 2>&1 || true
+            $SUDO apk add --no-cache libcap-utils libcap conntrack-tools >/dev/null 2>&1 || true
         elif command -v apt-get >/dev/null 2>&1; then
-            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libcap2-bin >/dev/null 2>&1 || {
+            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libcap2-bin conntrack >/dev/null 2>&1 || {
                 $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null 2>&1 || true
-                $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libcap2-bin >/dev/null 2>&1 || true
+                $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libcap2-bin conntrack >/dev/null 2>&1 || true
             }
-        elif command -v dnf >/dev/null 2>&1; then $SUDO dnf install -y -q libcap >/dev/null 2>&1 || true
-        elif command -v yum >/dev/null 2>&1; then $SUDO yum install -y -q libcap >/dev/null 2>&1 || true
+        elif command -v dnf >/dev/null 2>&1; then $SUDO dnf install -y -q libcap conntrack-tools >/dev/null 2>&1 || true
+        elif command -v yum >/dev/null 2>&1; then $SUDO yum install -y -q libcap conntrack-tools >/dev/null 2>&1 || true
         fi
     fi
 }
@@ -350,7 +350,7 @@ install_binary() {
     $SUDO sh -c '[ -x "$1" ]' _ "$bin_dst" || die "Binary not executable: $bin_dst"
 
     if command -v setcap >/dev/null 2>&1; then
-        $SUDO setcap cap_net_bind_service=+ep "$bin_dst" 2>/dev/null || true
+        $SUDO setcap cap_net_bind_service,cap_net_admin=+ep "$bin_dst" 2>/dev/null || true
     fi
 }
 
@@ -483,8 +483,8 @@ ExecStart="${INSTALL_DIR}/${BIN_NAME}" "${CONFIG_FILE}"
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
 
 [Install]
 WantedBy=multi-user.target
