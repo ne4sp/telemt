@@ -763,7 +763,11 @@ async fn run_inner(
 
     // Drop privileges after binding sockets (which may require root for port < 1024)
     if daemon_opts.user.is_some() || daemon_opts.group.is_some() {
-        if let Err(e) = drop_privileges(daemon_opts.user.as_deref(), daemon_opts.group.as_deref()) {
+        if let Err(e) = drop_privileges(
+            daemon_opts.user.as_deref(),
+            daemon_opts.group.as_deref(),
+            _pid_file.as_ref(),
+        ) {
             error!(error = %e, "Failed to drop privileges");
             std::process::exit(1);
         }
