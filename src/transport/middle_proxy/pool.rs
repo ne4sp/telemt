@@ -1670,7 +1670,8 @@ impl MePool {
                 }
 
                 if endpoints_len > 0 {
-                    let base_req = self.required_writers_for_dc_with_floor_mode(endpoints_len, false);
+                    let base_req =
+                        self.required_writers_for_dc_with_floor_mode(endpoints_len, false);
                     let active_for_dc = {
                         let ws = self.writers.read().await;
                         ws.iter()

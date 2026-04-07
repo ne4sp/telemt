@@ -383,8 +383,7 @@ async fn check_family(
     let reconnect_budget = health_reconnect_budget(pool, dc_endpoints.len());
     let reconnect_sem = Arc::new(Semaphore::new(reconnect_budget));
 
-    if pool.floor_mode() == MeFloorMode::Static {
-    }
+    if pool.floor_mode() == MeFloorMode::Static {}
 
     let mut live_addr_counts = HashMap::<(i32, SocketAddr), usize>::new();
     let mut live_writer_ids_by_addr = HashMap::<(i32, SocketAddr), Vec<u64>>::new();
@@ -617,7 +616,8 @@ async fn check_family(
                         continue;
                     }
 
-                    let base_req = pool_for_reconnect.required_writers_for_dc_with_floor_mode(endpoints_for_dc.len(), false);
+                    let base_req = pool_for_reconnect
+                        .required_writers_for_dc_with_floor_mode(endpoints_for_dc.len(), false);
                     if alive + restored >= base_req {
                         pool_for_reconnect
                             .stats
