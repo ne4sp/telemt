@@ -356,13 +356,9 @@ impl ConnRegistry {
             .entry(writer_id)
             .or_insert_with(HashSet::new)
             .insert(conn_id);
-        self.hot_binding.map.insert(
-            conn_id,
-            HotConnBinding {
-                writer_id,
-                meta,
-            },
-        );
+        self.hot_binding
+            .map
+            .insert(conn_id, HotConnBinding { writer_id, meta });
         true
     }
 
@@ -427,8 +423,16 @@ impl ConnRegistry {
             return None;
         }
 
-        let writer_id = self.hot_binding.map.get(&conn_id).map(|entry| entry.writer_id)?;
-        let writer = self.writers.map.get(&writer_id).map(|entry| entry.value().clone())?;
+        let writer_id = self
+            .hot_binding
+            .map
+            .get(&conn_id)
+            .map(|entry| entry.writer_id)?;
+        let writer = self
+            .writers
+            .map
+            .get(&writer_id)
+            .map(|entry| entry.value().clone())?;
         Some(ConnWriter {
             writer_id,
             tx: writer,

@@ -24,13 +24,25 @@ use super::registry::RouteResult;
 use super::{ConnRegistry, MeResponse};
 
 const DATA_ROUTE_MAX_ATTEMPTS: usize = 3;
+const DATA_ROUTE_QUEUE_FULL_STARVATION_THRESHOLD: u8 = 3;
 
 fn should_close_on_route_result_for_data(result: RouteResult) -> bool {
-    !matches!(result, RouteResult::Routed)
+    matches!(result, RouteResult::NoConn | RouteResult::ChannelClosed)
 }
 
 fn should_close_on_route_result_for_ack(result: RouteResult) -> bool {
     matches!(result, RouteResult::NoConn | RouteResult::ChannelClosed)
+}
+
+fn is_data_route_queue_full(result: RouteResult) -> bool {
+    matches!(
+        result,
+        RouteResult::QueueFullBase | RouteResult::QueueFullHigh
+    )
+}
+
+fn should_close_on_queue_full_streak(streak: u8) -> bool {
+    streak >= DATA_ROUTE_QUEUE_FULL_STARVATION_THRESHOLD
 }
 
 async fn route_data_with_retry(
@@ -85,6 +97,7 @@ pub(crate) async fn reader_loop(
 ) -> Result<()> {
     let mut raw = enc_leftover;
     let mut expected_seq: i32 = 0;
+    let mut data_route_queue_full_streak = HashMap::<u64, u8>::new();
 
     loop {
         let mut tmp = [0u8; 65_536];
@@ -169,25 +182,39 @@ pub(crate) async fn reader_loop(
                 trace!(cid, flags, len = data.len(), "RPC_PROXY_ANS");
 
                 let route_wait_ms = reader_route_data_wait_ms.load(Ordering::Relaxed);
-                let routed = route_data_with_retry(reg.as_ref(), cid, flags, data, route_wait_ms).await;
-                if should_close_on_route_result_for_data(routed) {
-                    match routed {
-                        RouteResult::NoConn => stats.increment_me_route_drop_no_conn(),
-                        RouteResult::ChannelClosed => {
-                            stats.increment_me_route_drop_channel_closed()
-                        }
-                        RouteResult::QueueFullBase => {
-                            stats.increment_me_route_drop_queue_full();
-                            stats.increment_me_route_drop_queue_full_base();
-                        }
-                        RouteResult::QueueFullHigh => {
-                            stats.increment_me_route_drop_queue_full();
-                            stats.increment_me_route_drop_queue_full_high();
-                        }
-                        RouteResult::Routed => {}
+                let routed =
+                    route_data_with_retry(reg.as_ref(), cid, flags, data, route_wait_ms).await;
+                if matches!(routed, RouteResult::Routed) {
+                    data_route_queue_full_streak.remove(&cid);
+                    continue;
+                }
+                match routed {
+                    RouteResult::NoConn => stats.increment_me_route_drop_no_conn(),
+                    RouteResult::ChannelClosed => stats.increment_me_route_drop_channel_closed(),
+                    RouteResult::QueueFullBase => {
+                        stats.increment_me_route_drop_queue_full();
+                        stats.increment_me_route_drop_queue_full_base();
                     }
+                    RouteResult::QueueFullHigh => {
+                        stats.increment_me_route_drop_queue_full();
+                        stats.increment_me_route_drop_queue_full_high();
+                    }
+                    RouteResult::Routed => {}
+                }
+                if should_close_on_route_result_for_data(routed) {
+                    data_route_queue_full_streak.remove(&cid);
                     reg.unregister(cid).await;
                     send_close_conn(&tx, cid).await;
+                    continue;
+                }
+                if is_data_route_queue_full(routed) {
+                    let streak = data_route_queue_full_streak.entry(cid).or_insert(0);
+                    *streak = streak.saturating_add(1);
+                    if should_close_on_queue_full_streak(*streak) {
+                        data_route_queue_full_streak.remove(&cid);
+                        reg.unregister(cid).await;
+                        send_close_conn(&tx, cid).await;
+                    }
                 }
             } else if pt == RPC_SIMPLE_ACK_U32 && body.len() >= 12 {
                 let cid = u64::from_le_bytes(body[0..8].try_into().unwrap());
@@ -221,11 +248,13 @@ pub(crate) async fn reader_loop(
                 debug!(cid, "RPC_CLOSE_EXT from ME");
                 let _ = reg.route_nowait(cid, MeResponse::Close).await;
                 reg.unregister(cid).await;
+                data_route_queue_full_streak.remove(&cid);
             } else if pt == RPC_CLOSE_CONN_U32 && body.len() >= 8 {
                 let cid = u64::from_le_bytes(body[0..8].try_into().unwrap());
                 debug!(cid, "RPC_CLOSE_CONN from ME");
                 let _ = reg.route_nowait(cid, MeResponse::Close).await;
                 reg.unregister(cid).await;
+                data_route_queue_full_streak.remove(&cid);
             } else if pt == RPC_PING_U32 && body.len() >= 8 {
                 let ping_id = i64::from_le_bytes(body[0..8].try_into().unwrap());
                 trace!(ping_id, "RPC_PING -> RPC_PONG");
@@ -292,26 +321,50 @@ mod tests {
     use crate::transport::middle_proxy::ConnRegistry;
 
     use super::{
-        MeResponse, RouteResult, route_data_with_retry, should_close_on_route_result_for_ack,
+        MeResponse, RouteResult, is_data_route_queue_full, route_data_with_retry,
+        should_close_on_queue_full_streak, should_close_on_route_result_for_ack,
         should_close_on_route_result_for_data,
     };
 
     #[test]
-    fn data_route_failure_always_closes_session() {
+    fn data_route_only_fatal_results_close_immediately() {
         assert!(!should_close_on_route_result_for_data(RouteResult::Routed));
+        assert!(!should_close_on_route_result_for_data(
+            RouteResult::QueueFullBase
+        ));
+        assert!(!should_close_on_route_result_for_data(
+            RouteResult::QueueFullHigh
+        ));
         assert!(should_close_on_route_result_for_data(RouteResult::NoConn));
-        assert!(should_close_on_route_result_for_data(RouteResult::ChannelClosed));
-        assert!(should_close_on_route_result_for_data(RouteResult::QueueFullBase));
-        assert!(should_close_on_route_result_for_data(RouteResult::QueueFullHigh));
+        assert!(should_close_on_route_result_for_data(
+            RouteResult::ChannelClosed
+        ));
+    }
+
+    #[test]
+    fn data_route_queue_full_uses_starvation_threshold() {
+        assert!(is_data_route_queue_full(RouteResult::QueueFullBase));
+        assert!(is_data_route_queue_full(RouteResult::QueueFullHigh));
+        assert!(!is_data_route_queue_full(RouteResult::NoConn));
+        assert!(!should_close_on_queue_full_streak(1));
+        assert!(!should_close_on_queue_full_streak(2));
+        assert!(should_close_on_queue_full_streak(3));
+        assert!(should_close_on_queue_full_streak(u8::MAX));
     }
 
     #[test]
     fn ack_queue_full_is_soft_dropped_without_forced_close() {
         assert!(!should_close_on_route_result_for_ack(RouteResult::Routed));
-        assert!(!should_close_on_route_result_for_ack(RouteResult::QueueFullBase));
-        assert!(!should_close_on_route_result_for_ack(RouteResult::QueueFullHigh));
+        assert!(!should_close_on_route_result_for_ack(
+            RouteResult::QueueFullBase
+        ));
+        assert!(!should_close_on_route_result_for_ack(
+            RouteResult::QueueFullHigh
+        ));
         assert!(should_close_on_route_result_for_ack(RouteResult::NoConn));
-        assert!(should_close_on_route_result_for_ack(RouteResult::ChannelClosed));
+        assert!(should_close_on_route_result_for_ack(
+            RouteResult::ChannelClosed
+        ));
     }
 
     #[tokio::test]
@@ -319,8 +372,7 @@ mod tests {
         let reg = ConnRegistry::with_route_channel_capacity(1);
         let (conn_id, mut rx) = reg.register().await;
 
-        let routed =
-            route_data_with_retry(&reg, conn_id, 0, Bytes::from_static(b"a"), 20).await;
+        let routed = route_data_with_retry(&reg, conn_id, 0, Bytes::from_static(b"a"), 20).await;
         assert!(matches!(routed, RouteResult::Routed));
         match rx.recv().await {
             Some(MeResponse::Data { flags, data }) => {
@@ -341,8 +393,7 @@ mod tests {
             RouteResult::Routed
         ));
 
-        let routed =
-            route_data_with_retry(&reg, conn_id, 0, Bytes::from_static(b"a"), 0).await;
+        let routed = route_data_with_retry(&reg, conn_id, 0, Bytes::from_static(b"a"), 0).await;
         assert!(matches!(
             routed,
             RouteResult::QueueFullBase | RouteResult::QueueFullHigh

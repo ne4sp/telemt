@@ -271,6 +271,7 @@ const QUOTA_LARGE_CHARGE_BYTES: u64 = 16 * 1024;
 const QUOTA_ADAPTIVE_INTERVAL_MIN_BYTES: u64 = 4 * 1024;
 const QUOTA_ADAPTIVE_INTERVAL_MAX_BYTES: u64 = 64 * 1024;
 const QUOTA_RESERVE_SPIN_RETRIES: usize = 64;
+const QUOTA_RESERVE_MAX_ROUNDS: usize = 8;
 
 #[inline]
 fn quota_adaptive_interval_bytes(remaining_before: u64) -> u64 {
@@ -319,6 +320,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for StatsIo<S> {
                         let mut reserved_total = None;
                         let mut reserve_rounds = 0usize;
                         while reserved_total.is_none() {
+                            let mut saw_contention = false;
                             for _ in 0..QUOTA_RESERVE_SPIN_RETRIES {
                                 match this.user_stats.quota_try_reserve(n_to_charge, limit) {
                                     Ok(total) => {
@@ -331,15 +333,20 @@ impl<S: AsyncRead + Unpin> AsyncRead for StatsIo<S> {
                                         return Poll::Ready(Err(quota_io_error()));
                                     }
                                     Err(crate::stats::QuotaReserveError::Contended) => {
-                                        std::hint::spin_loop();
+                                        saw_contention = true;
                                     }
                                 }
                             }
-                            reserve_rounds = reserve_rounds.saturating_add(1);
-                            if reserved_total.is_none() && reserve_rounds >= 8 {
-                                this.quota_exceeded.store(true, Ordering::Release);
-                                buf.set_filled(before);
-                                return Poll::Ready(Err(quota_io_error()));
+                            if reserved_total.is_none() {
+                                reserve_rounds = reserve_rounds.saturating_add(1);
+                                if reserve_rounds >= QUOTA_RESERVE_MAX_ROUNDS {
+                                    this.quota_exceeded.store(true, Ordering::Release);
+                                    buf.set_filled(before);
+                                    return Poll::Ready(Err(quota_io_error()));
+                                }
+                                if saw_contention {
+                                    std::thread::yield_now();
+                                }
                             }
                         }
 
@@ -407,6 +414,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for StatsIo<S> {
                     remaining_before = Some(remaining);
 
                     let desired = remaining.min(buf.len() as u64);
+                    let mut saw_contention = false;
                     for _ in 0..QUOTA_RESERVE_SPIN_RETRIES {
                         match this.user_stats.quota_try_reserve(desired, limit) {
                             Ok(_) => {
@@ -418,15 +426,20 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for StatsIo<S> {
                                 break;
                             }
                             Err(crate::stats::QuotaReserveError::Contended) => {
-                                std::hint::spin_loop();
+                                saw_contention = true;
                             }
                         }
                     }
 
-                    reserve_rounds = reserve_rounds.saturating_add(1);
-                    if reserved_bytes == 0 && reserve_rounds >= 8 {
-                        this.quota_exceeded.store(true, Ordering::Release);
-                        return Poll::Ready(Err(quota_io_error()));
+                    if reserved_bytes == 0 {
+                        reserve_rounds = reserve_rounds.saturating_add(1);
+                        if reserve_rounds >= QUOTA_RESERVE_MAX_ROUNDS {
+                            this.quota_exceeded.store(true, Ordering::Release);
+                            return Poll::Ready(Err(quota_io_error()));
+                        }
+                        if saw_contention {
+                            std::thread::yield_now();
+                        }
                     }
                 }
             } else {

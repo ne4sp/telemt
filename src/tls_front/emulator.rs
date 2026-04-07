@@ -1,6 +1,5 @@
 #![allow(clippy::too_many_arguments)]
 
-use crc32fast::Hasher;
 use crate::crypto::{SecureRandom, sha256_hmac};
 use crate::protocol::constants::{
     MAX_TLS_CIPHERTEXT_SIZE, TLS_RECORD_APPLICATION, TLS_RECORD_CHANGE_CIPHER,
@@ -8,6 +7,7 @@ use crate::protocol::constants::{
 };
 use crate::protocol::tls::{TLS_DIGEST_LEN, TLS_DIGEST_POS, gen_fake_x25519_key};
 use crate::tls_front::types::{CachedTlsData, ParsedCertificateInfo, TlsProfileSource};
+use crc32fast::Hasher;
 
 const MIN_APP_DATA: usize = 64;
 const MAX_APP_DATA: usize = MAX_TLS_CIPHERTEXT_SIZE;
@@ -343,7 +343,8 @@ mod tests {
     };
 
     use super::{
-        build_compact_cert_info_payload, build_emulated_server_hello, hash_compact_cert_info_payload,
+        build_compact_cert_info_payload, build_emulated_server_hello,
+        hash_compact_cert_info_payload,
     };
     use crate::crypto::SecureRandom;
     use crate::protocol::constants::{

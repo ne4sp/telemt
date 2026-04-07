@@ -56,6 +56,8 @@ const ME_D2C_FLUSH_BATCH_MAX_BYTES_MIN: usize = 4096;
 const ME_D2C_FRAME_BUF_SHRINK_HYSTERESIS_FACTOR: usize = 2;
 const ME_D2C_SINGLE_WRITE_COALESCE_MAX_BYTES: usize = 128 * 1024;
 const QUOTA_RESERVE_SPIN_RETRIES: usize = 32;
+const QUOTA_RESERVE_BACKOFF_MIN_MS: u64 = 1;
+const QUOTA_RESERVE_BACKOFF_MAX_MS: u64 = 16;
 
 #[derive(Default)]
 pub(crate) struct DesyncDedupRotationState {
@@ -573,6 +575,7 @@ async fn reserve_user_quota_with_yield(
     bytes: u64,
     limit: u64,
 ) -> std::result::Result<u64, QuotaReserveError> {
+    let mut backoff_ms = QUOTA_RESERVE_BACKOFF_MIN_MS;
     loop {
         for _ in 0..QUOTA_RESERVE_SPIN_RETRIES {
             match user_stats.quota_try_reserve(bytes, limit) {
@@ -585,6 +588,10 @@ async fn reserve_user_quota_with_yield(
         }
 
         tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+        backoff_ms = backoff_ms
+            .saturating_mul(2)
+            .min(QUOTA_RESERVE_BACKOFF_MAX_MS);
     }
 }
 

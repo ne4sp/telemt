@@ -26,7 +26,8 @@ me_writer_cmd_channel_capacity = 16385
 "#,
     );
 
-    let err = ProxyConfig::load(&path).expect_err("writer command capacity above hard cap must fail");
+    let err =
+        ProxyConfig::load(&path).expect_err("writer command capacity above hard cap must fail");
     let msg = err.to_string();
     assert!(
         msg.contains("general.me_writer_cmd_channel_capacity must be within [1, 16384]"),
@@ -45,7 +46,8 @@ me_route_channel_capacity = 8193
 "#,
     );
 
-    let err = ProxyConfig::load(&path).expect_err("route channel capacity above hard cap must fail");
+    let err =
+        ProxyConfig::load(&path).expect_err("route channel capacity above hard cap must fail");
     let msg = err.to_string();
     assert!(
         msg.contains("general.me_route_channel_capacity must be within [1, 8192]"),

@@ -196,7 +196,15 @@ async fn serve_listener(
                 let ip_tracker = ip_tracker.clone();
                 let config = config_rx_conn.borrow().clone();
                 async move {
-                    handle(req, &stats, &beobachten, &shared_state, &ip_tracker, &config).await
+                    handle(
+                        req,
+                        &stats,
+                        &beobachten,
+                        &shared_state,
+                        &ip_tracker,
+                        &config,
+                    )
+                    .await
                 }
             });
             if let Err(e) = http1::Builder::new()
@@ -3145,9 +3153,16 @@ mod tests {
         stats.increment_connects_all();
 
         let req = Request::builder().uri("/metrics").body(()).unwrap();
-        let resp = handle(req, &stats, &beobachten, shared_state.as_ref(), &tracker, &config)
-            .await
-            .unwrap();
+        let resp = handle(
+            req,
+            &stats,
+            &beobachten,
+            shared_state.as_ref(),
+            &tracker,
+            &config,
+        )
+        .await
+        .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert!(
@@ -3180,8 +3195,8 @@ mod tests {
             &tracker,
             &config,
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
         assert_eq!(resp_beob.status(), StatusCode::OK);
         let body_beob = resp_beob.into_body().collect().await.unwrap().to_bytes();
         let beob_text = std::str::from_utf8(body_beob.as_ref()).unwrap();
@@ -3197,8 +3212,8 @@ mod tests {
             &tracker,
             &config,
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
         assert_eq!(resp404.status(), StatusCode::NOT_FOUND);
     }
 }
