@@ -3,50 +3,39 @@
 ## Purpose
 
 **Telemt exists to solve technical problems.**
+- Telemt is open to contributors who want to learn, improve and build meaningful systems together.
+- It is a place for building, testing, reasoning, documenting, and improving systems.
+- Discussions that advance this work are in scope, discussions that divert it are not.
+- Technology has consequences, responsibility is inherent.
 
-Telemt is open to contributors who want to learn, improve and build meaningful systems together.
+> **Absicht bestimmt die Form**
 
-It is a place for building, testing, reasoning, documenting, and improving systems.
-
-Discussions that advance this work are in scope. Discussions that divert it are not.
-
-Technology has consequences. Responsibility is inherent.
-
-> **Zweck bestimmt die Form.**
-
-> Purpose defines form.
+> Purpose defines form
 
 ---
 
 ## Principles
 
 * **Technical over emotional**
-
-  Arguments are grounded in data, logs, reproducible cases, or clear reasoning.
+  - Arguments are grounded in data, logs, reproducible cases, or clear reasoning.
 
 * **Clarity over noise**
-
-  Communication is structured, concise, and relevant.
+  - Communication is structured, concise, and relevant.
 
 * **Openness with standards**
-
-  Participation is open. The work remains disciplined.
+  - Participation is open. The work remains disciplined.
 
 * **Independence of judgment**
-
-  Claims are evaluated on technical merit, not affiliation or posture.
+  - Claims are evaluated on technical merit, not affiliation or posture.
 
 * **Responsibility over capability**
-
-  Capability does not justify careless use.
+  - Capability does not justify careless use.
 
 * **Cooperation over friction**
-
-  Progress depends on coordination, mutual support, and honest review.
+  - Progress depends on coordination, mutual support, and honest review.
 
 * **Good intent, rigorous method**
-
-  Assume good intent, but require rigor.
+  - Assume good intent, but require rigor.
 
 > **Aussagen gelten nach ihrer Begründung.**
 
